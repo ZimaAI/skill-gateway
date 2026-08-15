@@ -1,0 +1,18 @@
+{
+  "name": "@skill-gate/repo-store",
+  "version": "0.1.0",
+  "description": "Repository-file persistence adapter for skill-gate: catalog, usage, config, skill folders, anchor relocation and concurrent usage merge.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "license": "MIT"
+}

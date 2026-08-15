@@ -1,0 +1,14 @@
+# skill-gateway as a dynamic DSH plugin.
+#
+# Install:
+#   dsh plugin add skill-gateway-dsh
+#
+# The patch mounts the host half. The package's `dsh.client` metadata injects
+# `client/client.js` into the web client.
+
+- insert:
+    - id: skill-gateway
+      name: 'skill-gateway-dsh'
+      config:
+        dataDir: ''
+        cwd: ''

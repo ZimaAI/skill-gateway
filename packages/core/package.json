@@ -1,0 +1,22 @@
+{
+  "name": "@skill-gate/core",
+  "version": "0.1.0",
+  "description": "Pure, framework-free core for the skill-gateway: catalog CRUD, find/browse/load, upload validation, usage recording and aggregation.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./catalog": "./src/catalog.js",
+    "./matching": "./src/matching.js",
+    "./upload": "./src/upload.js",
+    "./usage": "./src/usage.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,18 @@
+{
+  "name": "skill-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A DeepSeek Harness skill gateway: scene-tree catalog, progressive loading, and persistent usage statistics.",
+  "scripts": {
+    "test": "node --test packages/core/test/*.test.js packages/repo-store/test/*.test.js packages/dsh-plugin/test/*.test.js",
+    "test:core": "node --test packages/core/test/*.test.js",
+    "test:repo-store": "node --test packages/repo-store/test/*.test.js",
+    "test:plugin": "node --test packages/dsh-plugin/test/*.test.js"
+  },
+  "license": "MIT",
+  "workspaces": [
+    "packages/core",
+    "packages/repo-store"
+  ]
+}
