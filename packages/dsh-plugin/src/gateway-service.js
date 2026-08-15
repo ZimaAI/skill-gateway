@@ -5,22 +5,37 @@
  */
 
 import path from 'node:path';
-import {
+
+let coreModule;
+try {
+  coreModule = await import('@skill-gate/core');
+} catch {
+  coreModule = await import('../../core/src/index.js');
+}
+
+let repoStoreModule;
+try {
+  repoStoreModule = await import('@skill-gate/repo-store');
+} catch {
+  repoStoreModule = await import('../../repo-store/src/index.js');
+}
+
+const {
   aggregateUsage,
-  attachSkill as coreAttachSkill,
-  browse as coreBrowse,
-  createScene as coreCreateScene,
-  deleteScene as coreDeleteScene,
-  deleteSkill as coreDeleteSkill,
-  detachSkill as coreDetachSkill,
-  find as coreFind,
+  attachSkill: coreAttachSkill,
+  browse: coreBrowse,
+  createScene: coreCreateScene,
+  deleteScene: coreDeleteScene,
+  deleteSkill: coreDeleteSkill,
+  detachSkill: coreDetachSkill,
+  find: coreFind,
   loadSkillFiles,
   recordUsage,
-  updateScene as coreUpdateScene,
-  upsertSkill as coreUpsertSkill,
+  updateScene: coreUpdateScene,
+  upsertSkill: coreUpsertSkill,
   validateUpload,
-} from '../../core/src/index.js';
-import { RepoStore } from '../../repo-store/src/index.js';
+} = coreModule;
+const { RepoStore } = repoStoreModule;
 
 export class SkillGatewayService {
   constructor(options = {}) {

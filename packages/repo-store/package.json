@@ -14,5 +14,8 @@
   "scripts": {
     "test": "node --test test/*.test.js"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@skill-gate/core": "file:../core"
+  }
 }

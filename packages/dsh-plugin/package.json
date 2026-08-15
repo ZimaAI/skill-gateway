@@ -39,5 +39,9 @@
     "@deepseek-ai/schemastery": "^3.18.1",
     "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.1"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@skill-gate/core": "file:../core",
+    "@skill-gate/repo-store": "file:../repo-store"
+  }
 }

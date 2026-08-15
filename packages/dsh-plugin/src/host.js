@@ -143,7 +143,7 @@ export function apply(ctx, config = {}) {
           properties: {
             ok: { type: 'boolean', required: true },
             action: { type: 'string' },
-            result: { type: 'object' },
+            result: { type: 'object', additionalProperties: true },
             error: { type: 'string' },
             usageRecorded: { type: 'boolean' },
           },
