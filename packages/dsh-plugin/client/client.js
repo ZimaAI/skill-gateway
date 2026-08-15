@@ -7,7 +7,7 @@
 // The panel talks to the host routes registered by src/host.js.
 
 window.__ModuleLoader__.load({
-  id: 'skill-gateway',
+  id: 'skill-gateway-dsh',
   factory: (require) => {
     var module = { exports: {} };
     var exports = module.exports;
@@ -15,7 +15,7 @@ window.__ModuleLoader__.load({
 
     const React = require('react');
     const { useState, useEffect, useMemo, useCallback } = React;
-    const name = 'skill-gateway';
+    const name = 'skill-gateway-dsh';
 
     async function api(method, pathname, body) {
       const opts = { method, headers: {} };
