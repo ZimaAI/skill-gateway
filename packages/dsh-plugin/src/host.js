@@ -30,11 +30,15 @@ export const Config = z.object({
 
 const GATEWAY_HINT = [
   '## Skill gateway',
-  '当子任务可能需要技能时，按以下步骤通过 skill_gateway 沿场景树逐层深入，不要跳过场景或凭空猜测场景 id：',
-  '1. 调用 skill_gateway(action: "browse")，不传 sceneId；工具会返回根场景及其直接子场景和直接挂载的技能元数据。',
-  '2. 如果当前场景的 skills 中已有合适的技能，直接执行第 4 步；否则从返回的 children 中选择最相关的一个子场景，调用 skill_gateway(action: "browse", sceneId: "<该子场景 id>") 进入该场景。',
-  '3. 重复第 2 步逐层深入；每次返回的都只是当前场景的直接子场景和直接技能，不要跳到未返回过的场景。如果当前分支不合适，使用返回的 parentId 退回上一级已浏览过的场景并选择其他子场景。',
+  '在任何设计、执行开始前，先通过 skill_gateway 逐层深入，探索合适的 skill 加载至上下文中。',
+  '按以下步骤通过 skill_gateway 沿场景树逐层深入，不要跳过场景或凭空猜测场景 id：',
+  '1. 调用 skill_gateway(action: "browse")，工具会返回根场景及其直接子场景和直接挂载的技能元数据。',
+  '2. 选择符合行动目的的场景，调用 skill_gateway(action: "browse", sceneId: "<场景 id>") 进入该场景',
+  '3. 重复第 2 步逐层深入，每次返回的都只是当前场景的直接子场景和直接技能，直到进入到含有合适的 skill 的场景。',
   '4. 调用 skill_gateway(action: "load", skillName: "<技能 name>", scenePath: "<当前场景路径>") 一次性加载该技能全文并应用。',
+  '注意：',
+  '1. 如果有多个你认为合适的场景，可以进入不同的场景，加载任意多项合适的技能。',
+  '2. 如果没有符合的场景和 skill，则不需要加载技能，直接开始下一步任务。'
 ].join('\n');
 
 function firstString(value) {
