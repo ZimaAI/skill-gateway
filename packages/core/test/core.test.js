@@ -170,6 +170,25 @@ test('validateUpload accepts a folder whose only root SKILL.md has valid frontma
   assert.deepEqual(Object.keys(result.skill.files), ['SKILL.md', 'examples/flow.md']);
 });
 
+test('validateUpload imports every root asset and ignores nested SKILL.md files', () => {
+  const result = validateUpload({
+    name: 'accessibility',
+    files: [
+      { path: 'accessibility/SKILL.md', content: '---\nname: accessibility\ndescription: audit accessibility\n---\n# Accessibility' },
+      { path: 'accessibility/references/SKILL.md', content: '---\nname: nested-not-root\ndescription: nested reference\n---\n' },
+      { path: 'accessibility/references/checklist.md', content: '# checklist' },
+      { path: 'accessibility/tools/axe.md', content: '# axe' },
+    ],
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(Object.keys(result.skill.files).sort(), [
+    'SKILL.md',
+    'references/SKILL.md',
+    'references/checklist.md',
+    'tools/axe.md',
+  ]);
+});
+
 test('validateUpload strips one wrapper folder from zip-style paths', () => {
   const result = validateUpload({
     files: [

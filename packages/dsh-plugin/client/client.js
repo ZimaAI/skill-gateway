@@ -456,9 +456,16 @@ window.__ModuleLoader__.load({
         const byRoot = new Map();
         for (const file of files) {
           const rel = file.webkitRelativePath || file.name;
-          const root = rel.split('/').slice(0, -1).join('/');
+          const parts = rel.split('/').filter(Boolean);
+          if (!parts.length) continue;
+          const root = parts[0];
           if (!byRoot.has(root)) byRoot.set(root, []);
           byRoot.get(root).push({ path: rel, content: await file.text() });
+        }
+        if (byRoot.size !== 1) {
+          setReport([{ ok: false, name: '文件夹上传', reasons: ['一次只能选择一个技能文件夹。'] }]);
+          input.value = '';
+          return;
         }
         await uploadItems([...byRoot.entries()].map(([root, fileList]) => ({ name: root, files: fileList })));
         input.value = '';
