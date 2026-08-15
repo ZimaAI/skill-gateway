@@ -20,32 +20,60 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
 
     const CSS = `
-.sg-root, .sg-root * { box-sizing: border-box; }
-.sg-root {
-  --sg-bg: var(--dsw-alias-bg-layer-1, #E7EDE9);
-  --sg-bg-soft: var(--dsw-alias-bg-layer-2, #EDF2EE);
-  --sg-surface: var(--dsw-alias-bg-layer-2, #F6F8F6);
-  --sg-surface-2: var(--dsw-alias-bg-layer-3, #FCFDFC);
-  --sg-ink: var(--dsw-alias-label-primary, #17251F);
-  --sg-ink-2: var(--dsw-alias-label-secondary, #3D4E47);
-  --sg-muted: var(--dsw-alias-label-tertiary, #5D6E66);
-  --sg-faint: var(--dsw-alias-label-tertiary, #63736B);
-  --sg-line: var(--dsw-alias-border-l2, #D3DDD7);
-  --sg-line-strong: var(--dsw-alias-border-l3, #B8C6BF);
-  --sg-accent: var(--dsw-static-green-600, #2F6B56);
-  --sg-accent-hover: var(--dsw-static-green-700, #245542);
-  --sg-accent-soft: var(--dsw-alias-bg-brand, rgba(47,107,86,.15));
+.sg-root, .sg-root *, .sg-fab, .sg-fab *, .sg-panel, .sg-panel * { box-sizing: border-box; }
+:root, .sg-root {
+  --sg-bg: #E7EDE9;
+  --sg-bg-soft: #EDF2EE;
+  --sg-surface: #F6F8F6;
+  --sg-surface-2: #FCFDFC;
+  --sg-ink: #17251F;
+  --sg-ink-2: #3D4E47;
+  --sg-muted: #5D6E66;
+  --sg-faint: #63736B;
+  --sg-line: #D3DDD7;
+  --sg-line-strong: #B8C6BF;
+  --sg-accent: #2F6B56;
+  --sg-accent-hover: #245542;
+  --sg-accent-soft: #DCEAE3;
   --sg-on-accent: #F2F9F5;
-  --sg-danger: var(--dsw-static-red-500, #AE4932);
-  --sg-danger-soft: var(--dsw-alias-bg-danger, rgba(174,73,50,.12));
-  --sg-warning: var(--dsw-static-yellow-600, #8A631B);
-  --sg-warning-soft: var(--dsw-alias-bg-warning, rgba(138,99,27,.12));
-  --sg-agent: var(--dsw-alias-label-secondary, #4C5B55);
-  --sg-agent-soft: var(--dsw-alias-bg-interactive, rgba(76,91,85,.12));
+  --sg-danger: #AE4932;
+  --sg-danger-soft: #F7E5DE;
+  --sg-on-danger: #FFF6F3;
+  --sg-warning: #8A631B;
+  --sg-warning-soft: #F4EBD2;
+  --sg-agent: #4C5B55;
+  --sg-agent-soft: #E5EAE7;
   --sg-radius: 8px;
   --sg-shadow: 0 18px 40px rgba(0,0,0,.24);
   --sg-font: "Avenir Next","Segoe UI Variable","Segoe UI","Helvetica Neue","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
   --sg-mono: "Cascadia Code","SF Mono","JetBrains Mono","Fira Code",Menlo,Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root, .sg-root {
+    --sg-bg: #101815;
+    --sg-bg-soft: #131F1A;
+    --sg-surface: #16211D;
+    --sg-surface-2: #1B2823;
+    --sg-ink: #E9F0EC;
+    --sg-ink-2: #C2CEC8;
+    --sg-muted: #91A098;
+    --sg-faint: #7E9087;
+    --sg-line: #2A3933;
+    --sg-line-strong: #3A4D45;
+    --sg-accent: #55AD86;
+    --sg-accent-hover: #6DBD98;
+    --sg-accent-soft: #1B352A;
+    --sg-on-accent: #0B1C14;
+    --sg-danger: #E18364;
+    --sg-danger-soft: #3A221B;
+    --sg-on-danger: #26130D;
+    --sg-warning: #D8AE58;
+    --sg-warning-soft: #342A16;
+    --sg-agent: #A9B6AF;
+    --sg-agent-soft: #202C27;
+  }
+}
+.sg-root {
   font-family: var(--sg-font);
   color: var(--sg-ink);
 }
@@ -790,13 +818,15 @@ window.__ModuleLoader__.load({
       };
 
       if (!open) {
-        return h('button', { className: 'sg-fab', onClick: () => setOpen(true), 'aria-label': '打开 Skill Gateway' },
-          h('span', { className: 'sg-fab-glyph' }, '▮'),
-          'Skill Gateway');
+        return h('div', { className: 'sg-root' },
+          h('button', { className: 'sg-fab', onClick: () => setOpen(true), 'aria-label': '打开 Skill Gateway' },
+            h('span', { className: 'sg-fab-glyph' }, '▮'),
+            'Skill Gateway'));
       }
 
       const routeState = state ? (state.config.enabled ? 'on' : 'off') : 'loading';
-      return h('aside', { className: 'sg-panel', 'aria-label': 'Skill Gateway' },
+      return h('div', { className: 'sg-root' },
+        h('aside', { className: 'sg-panel', 'aria-label': 'Skill Gateway' },
         h('header', { className: 'sg-head' },
           h('div', null,
             h('div', { className: 'sg-kicker' }, 'CLIENT ADAPTER'),
@@ -840,9 +870,9 @@ window.__ModuleLoader__.load({
           state && tab === 'catalog' ? h(CatalogTab, { state, cwd, refresh, notify }) : null,
           state && tab === 'stats' ? h(StatsTab, { cwd, sessionId }) : null,
           state && tab === 'gateway' ? h(GatewayTab, { state, cwd, sessionId, onChanged: refresh, notify }) : null),
-        h('footer', { className: 'sg-foot' },
-          h('span', { className: 'sg-last' }, lastEvent),
-          h('span', null, state && state.location ? state.location.dataDir : '—')));
+          h('footer', { className: 'sg-foot' },
+            h('span', { className: 'sg-last' }, lastEvent),
+            h('span', null, state && state.location ? state.location.dataDir : '—'))));
     }
 
     function apply(ctx) {
