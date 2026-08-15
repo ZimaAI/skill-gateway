@@ -1,0 +1,3032 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>skill-gateway plugin prototype</title>
+<!--
+PROTOTYPE: skill-gateway 插件 UI 原型（一次性代码，不进生产）
+
+原型问题：
+  在真实 Harness 密度下，侧边栏入口 + 「场景树管理」 + 「统计」两个 tab 的工作流是否顺手？
+  网关工具 find / browse / load 的渐进式取用和 usage observer 能否被非开发者看懂？
+
+假设与边界：
+  - 这是 UI 分支的功能原型：用真实可点的界面验证流程，而不是静态稿。
+  - 核心逻辑以纯函数形式写在 <script> 中，输入输出为纯 JSON，后续可提走。
+  - 状态仅存内存，刷新即重置；不做真实文件持久化。
+  - 上传支持文件夹（webkitdirectory）与 zip（内置最小解析器）；大文件只保留文本或占位。
+
+设计方向（按 frontend-design skill）：
+  - 主题：skill gateway 是一道闸门 + 路由台。签名元素是面板顶部的「双路由信号条」，
+    它把 gateway on/off、默认技能旁路、usage observer 恒开这三件事画成一条可读的线路。
+  - 色板：mineral paper / spruce ink / gate green。单一强调色，深浅两套 token。
+  - 字体：系统 UI 字体 + mono 数据标签；无外链依赖。
+  - 动效：仅面板滑入和 load 脉冲；prefers-reduced-motion 下全部关闭。
+-->
+<style>
+:root{
+  color-scheme: light;
+  --bg:#E7EDE9;
+  --bg-soft:#EDF2EE;
+  --surface:#F6F8F6;
+  --surface-2:#FCFDFC;
+  --ink:#17251F;
+  --ink-2:#3D4E47;
+  --muted:#5D6E66;
+  --faint:#63736B;
+  --line:#D3DDD7;
+  --line-strong:#B8C6BF;
+  --accent:#2F6B56;
+  --accent-hover:#245542;
+  --accent-soft:#DCEAE3;
+  --on-accent:#F2F9F5;
+  --danger:#AE4932;
+  --danger-soft:#F7E5DE;
+  --on-danger:#FFF6F3;
+  --warning:#8A631B;
+  --warning-soft:#F4EBD2;
+  --agent-source:#4C5B55;
+  --agent-source-soft:#E5EAE7;
+  --shadow:0 14px 34px rgba(23,37,31,.18);
+  --bar-bg:#17251F;
+  --bar-ink:#EDF2EE;
+  --bar-ink-soft:#C3D0C9;
+  --bar-line:#3A4D45;
+  --radius:6px;
+  --panel-w:692px;
+  --font-ui:"Avenir Next","Segoe UI Variable","Segoe UI","Helvetica Neue","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  --font-mono:"Cascadia Code","SF Mono","JetBrains Mono","Fira Code",Menlo,Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme: dark;
+    --bg:#101815;
+    --bg-soft:#131F1A;
+    --surface:#16211D;
+    --surface-2:#1B2823;
+    --ink:#E9F0EC;
+    --ink-2:#C2CEC8;
+    --muted:#91A098;
+    --faint:#7E9087;
+    --line:#2A3933;
+    --line-strong:#3A4D45;
+    --accent:#55AD86;
+    --accent-hover:#6DBD98;
+    --accent-soft:#1B352A;
+    --on-accent:#0B1C14;
+    --danger:#E18364;
+    --danger-soft:#3A221B;
+    --on-danger:#26130D;
+    --warning:#D8AE58;
+    --warning-soft:#342A16;
+    --agent-source:#A9B6AF;
+    --agent-source-soft:#202C27;
+    --shadow:0 18px 40px rgba(0,0,0,.45);
+    --bar-bg:#0A0F0D;
+    --bar-ink:#D7E2DC;
+    --bar-ink-soft:#8FA098;
+    --bar-line:#2A3933;
+  }
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--ink);
+  font:14px/1.5 var(--font-ui);
+  -webkit-font-smoothing:antialiased;
+}
+button,input,textarea,select{font:inherit;color:inherit}
+button{letter-spacing:.01em}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{
+  outline:2px solid var(--accent);
+  outline-offset:1px;
+}
+.mono{font-family:var(--font-mono)}
+
+/* 原型顶部提示条 */
+.proto-bar{
+  height:36px;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:0 14px;
+  background:var(--bar-bg);
+  color:var(--bar-ink);
+  font-size:12px;
+  position:relative;
+  z-index:10;
+}
+.proto-badge{
+  font-family:var(--font-mono);
+  font-size:10px;
+  letter-spacing:.14em;
+  background:var(--accent);
+  color:var(--on-accent);
+  padding:3px 7px;
+  border-radius:3px;
+  white-space:nowrap;
+}
+.proto-bar p{
+  margin:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--bar-ink-soft);
+}
+.proto-bar .bar-gap{width:1px;height:14px;background:var(--bar-line);flex:0 0 auto}
+.proto-actions{margin-left:auto;display:flex;gap:8px;flex:0 0 auto}
+.proto-btn{
+  background:transparent;
+  border:1px solid var(--bar-line);
+  color:var(--bar-ink);
+  border-radius:var(--radius);
+  padding:4px 9px;
+  font-size:12px;
+  cursor:pointer;
+}
+.proto-btn:hover{background:rgba(255,255,255,.08)}
+
+/* 应用外壳 */
+.app{
+  height:calc(100dvh - 36px);
+  display:flex;
+  min-height:0;
+}
+.rail{
+  width:236px;
+  flex:0 0 auto;
+  background:var(--surface);
+  border-right:1px solid var(--line);
+  display:flex;
+  flex-direction:column;
+  padding:14px 12px;
+  gap:14px;
+  min-height:0;
+}
+.rail-brand{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:2px 6px 10px;
+  border-bottom:1px solid var(--line);
+}
+.brand-mark{
+  width:24px;height:24px;
+  border:1px solid var(--accent);
+  border-radius:5px;
+  display:grid;
+  place-items:center;
+  color:var(--accent);
+  font-family:var(--font-mono);
+  font-size:11px;
+  background:var(--accent-soft);
+}
+.brand-name{font-weight:650;font-size:13px}
+.brand-sub{font-family:var(--font-mono);font-size:10px;color:var(--muted)}
+.rail-nav{display:grid;gap:4px}
+.rail-nav button{
+  width:100%;
+  text-align:left;
+  background:transparent;
+  border:0;
+  border-radius:var(--radius);
+  padding:8px 10px;
+  cursor:pointer;
+  color:var(--ink-2);
+  font-size:13px;
+}
+.rail-nav button:hover{background:var(--bg-soft)}
+.rail-nav button.is-active{background:var(--accent-soft);color:var(--accent);font-weight:650}
+.rail-spacer{flex:1}
+.rail-entry{
+  width:100%;
+  text-align:left;
+  background:var(--surface-2);
+  border:1px solid var(--line-strong);
+  border-radius:var(--radius);
+  padding:10px;
+  cursor:pointer;
+}
+.rail-entry:hover{border-color:var(--accent)}
+.rail-entry .entry-top{display:flex;align-items:center;gap:8px}
+.gate-glyph{
+  width:26px;height:16px;
+  flex:0 0 auto;
+  border:1px solid var(--accent);
+  border-radius:3px;
+  position:relative;
+  background:var(--accent-soft);
+}
+.gate-glyph i{
+  position:absolute;
+  left:3px;top:7px;
+  width:18px;height:2px;
+  background:var(--accent);
+  transform-origin:left center;
+  transform:rotate(-24deg);
+  transition:transform .3s cubic-bezier(.16,1,.3,1);
+}
+.rail-entry.is-open .gate-glyph i{transform:rotate(0deg)}
+.rail-entry .entry-title{font-size:12px;font-weight:650}
+.rail-entry .entry-state{font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-top:2px}
+.rail-entry .entry-state b{color:var(--accent);font-weight:600}
+.rail-entry .entry-state b.off{color:var(--danger)}
+
+/* 主舞台 */
+.stage{
+  flex:1;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  position:relative;
+  background:var(--bg);
+}
+.stage-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:16px;
+  padding:18px 22px 14px;
+  border-bottom:1px solid var(--line);
+  background:var(--bg-soft);
+}
+.stage-head h1{margin:0;font-size:17px;font-weight:700;letter-spacing:.01em}
+.stage-head .hint{
+  margin:4px 0 0;
+  font-size:12px;
+  color:var(--muted);
+  max-width:68ch;
+}
+.stage-head .hint b{color:var(--accent);font-weight:650}
+.open-panel-btn{
+  flex:0 0 auto;
+  background:var(--accent);
+  border:1px solid var(--accent);
+  color:var(--on-accent);
+  border-radius:var(--radius);
+  padding:8px 12px;
+  font-size:12px;
+  font-weight:650;
+  cursor:pointer;
+}
+.open-panel-btn:hover{background:var(--accent-hover)}
+.transcript{
+  flex:1;
+  overflow:auto;
+  padding:20px 22px 32px;
+}
+.transcript-inner{max-width:760px;margin:0 auto;display:grid;gap:12px}
+.msg{max-width:76%;padding:9px 11px;border-radius:var(--radius);font-size:13px}
+.msg-time{font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:3px}
+.msg-system{
+  max-width:100%;
+  background:var(--agent-source-soft);
+  border:1px dashed var(--line-strong);
+  color:var(--ink-2);
+  font-family:var(--font-mono);
+  font-size:11px;
+}
+.msg-user{
+  justify-self:end;
+  background:var(--accent);
+  color:var(--on-accent);
+  border:1px solid var(--accent);
+}
+.msg-assistant{
+  justify-self:start;
+  background:var(--surface);
+  border:1px solid var(--line);
+}
+.msg-tool{
+  justify-self:start;
+  max-width:100%;
+  width:100%;
+  background:var(--surface-2);
+  border:1px solid var(--line-strong);
+  padding:0;
+  overflow:hidden;
+}
+.tool-head{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 10px;
+  border-bottom:1px solid var(--line);
+  background:var(--bg-soft);
+  font-family:var(--font-mono);
+  font-size:11px;
+}
+.tool-name{color:var(--accent);font-weight:700}
+.tool-input{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool-body{padding:9px 10px;font-size:12px;color:var(--ink-2)}
+.tool-body .file-row{font-family:var(--font-mono);font-size:11px;padding:3px 0;color:var(--muted)}
+.msg-observer{
+  justify-self:start;
+  max-width:100%;
+  display:flex;
+  gap:8px;
+  align-items:center;
+  font-family:var(--font-mono);
+  font-size:10px;
+  color:var(--muted);
+}
+.observer-led{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:0 0 auto}
+
+/* 插件面板 */
+.panel{
+  position:absolute;
+  top:0;right:0;bottom:0;
+  width:min(var(--panel-w),100%);
+  background:var(--surface);
+  border-left:1px solid var(--line);
+  box-shadow:var(--shadow);
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+  transform:translateX(103%);
+  visibility:hidden;
+  transition:transform .28s cubic-bezier(.16,1,.3,1),visibility 0s linear .28s;
+  z-index:20;
+}
+.panel.is-open{transform:translateX(0);visibility:visible;transition:transform .28s cubic-bezier(.16,1,.3,1)}
+.panel-head{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:12px 16px;
+  border-bottom:1px solid var(--line);
+  background:var(--surface-2);
+  flex:0 0 auto;
+}
+.panel-kicker{font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;color:var(--muted)}
+.panel-title{font-size:14px;font-weight:700;margin:0}
+.panel-head .head-gap{flex:1}
+.switch{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  background:transparent;
+  border:0;
+  cursor:pointer;
+  padding:4px 6px;
+  border-radius:var(--radius);
+}
+.switch:hover{background:var(--bg-soft)}
+.switch .track{
+  width:34px;height:19px;
+  border-radius:999px;
+  background:var(--line-strong);
+  position:relative;
+  transition:background .2s ease;
+}
+.switch .knob{
+  position:absolute;
+  left:2px;top:2px;
+  width:15px;height:15px;
+  border-radius:50%;
+  background:var(--surface-2);
+  box-shadow:0 1px 3px rgba(0,0,0,.25);
+  transition:transform .2s ease;
+}
+.switch[aria-checked="true"] .track{background:var(--accent)}
+.switch[aria-checked="true"] .knob{transform:translateX(15px)}
+.switch-label{font-size:12px;color:var(--ink-2)}
+.icon-btn{
+  width:28px;height:28px;
+  display:grid;place-items:center;
+  background:transparent;
+  border:1px solid transparent;
+  border-radius:var(--radius);
+  cursor:pointer;
+  color:var(--muted);
+  font-size:16px;
+}
+.icon-btn:hover{background:var(--bg-soft);color:var(--ink)}
+
+/* 签名元素：双路由信号条 */
+.route-strip{
+  flex:0 0 auto;
+  padding:12px 16px;
+  border-bottom:1px solid var(--line);
+  background:var(--bg-soft);
+}
+.route-lanes{display:grid;gap:9px}
+.route-lane{
+  display:grid;
+  grid-template-columns:94px 1fr;
+  gap:10px;
+  align-items:center;
+  font-size:11px;
+}
+.lane-label{
+  font-family:var(--font-mono);
+  font-size:9px;
+  letter-spacing:.1em;
+  color:var(--muted);
+  line-height:1.3;
+}
+.route-track{display:flex;align-items:center;min-width:0}
+.route-node{
+  padding:3px 7px;
+  border:1px solid var(--line-strong);
+  border-radius:4px;
+  background:var(--surface-2);
+  white-space:nowrap;
+  color:var(--ink-2);
+  font-size:11px;
+}
+.route-wire{
+  flex:1;
+  height:1px;
+  min-width:12px;
+  background:var(--line-strong);
+  position:relative;
+  overflow:visible;
+}
+.route-wire.is-live{background:var(--accent)}
+.gate-node{
+  flex:0 0 auto;
+  width:30px;height:17px;
+  border:1px solid var(--ink-2);
+  border-radius:3px;
+  position:relative;
+  background:var(--surface-2);
+}
+.gate-node i{
+  position:absolute;
+  left:4px;top:8px;
+  width:20px;height:2px;
+  background:var(--ink-2);
+  transform-origin:left center;
+  transform:rotate(-22deg);
+  transition:transform .3s cubic-bezier(.16,1,.3,1),background .2s ease;
+}
+.route-lane.is-live .gate-node{border-color:var(--accent)}
+.route-lane.is-live .gate-node i{background:var(--accent);transform:rotate(0deg)}
+.route-lane.is-off{opacity:.48}
+.route-lane.is-off .route-node{text-decoration:line-through;text-decoration-thickness:1px;text-decoration-color:var(--faint)}
+.route-pulse{
+  position:absolute;
+  left:0;top:-2px;
+  width:5px;height:5px;
+  border-radius:50%;
+  background:var(--accent);
+  opacity:0;
+}
+.route-pulse.is-running{animation:route-pulse .85s cubic-bezier(.16,1,.3,1)}
+@keyframes route-pulse{
+  0%{opacity:.95;left:0}
+  100%{opacity:0;left:calc(100% - 5px)}
+}
+.observer-row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top:9px;
+  font-family:var(--font-mono);
+  font-size:9px;
+  letter-spacing:.1em;
+  color:var(--muted);
+}
+.observer-row .observer-led{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.observer-row span:last-child{margin-left:auto;color:var(--accent)}
+
+/* tab */
+.panel-tabs{
+  flex:0 0 auto;
+  display:flex;
+  gap:2px;
+  padding:0 14px;
+  border-bottom:1px solid var(--line);
+  background:var(--surface);
+}
+.tab-btn{
+  background:transparent;
+  border:0;
+  border-bottom:2px solid transparent;
+  padding:10px 11px 9px;
+  cursor:pointer;
+  color:var(--muted);
+  font-size:13px;
+}
+.tab-btn:hover{color:var(--ink)}
+.tab-btn.is-active{color:var(--accent);border-bottom-color:var(--accent);font-weight:650}
+.panel-body{
+  flex:1;
+  min-height:0;
+  overflow:auto;
+  padding:14px 16px 18px;
+}
+.panel-foot{
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 16px;
+  border-top:1px solid var(--line);
+  background:var(--surface-2);
+  font-size:11px;
+  color:var(--muted);
+}
+.panel-foot .last-event{
+  flex:1;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.panel-foot b{color:var(--ink-2);font-weight:600}
+
+/* 通用卡片与表单 */
+.card{
+  background:var(--surface-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:13px;
+  margin-bottom:12px;
+}
+.card:last-child{margin-bottom:0}
+.card-head{
+  display:flex;
+  align-items:baseline;
+  gap:8px;
+  margin-bottom:10px;
+}
+.card-head h3{margin:0;font-size:13px;font-weight:700}
+.card-head .card-sub{font-family:var(--font-mono);font-size:10px;color:var(--muted)}
+.card-head .head-gap{flex:1}
+.field{margin-bottom:11px}
+.field:last-child{margin-bottom:0}
+.field label{
+  display:block;
+  font-size:11px;
+  color:var(--muted);
+  margin-bottom:5px;
+}
+.input,.textarea,.select{
+  width:100%;
+  background:var(--surface);
+  border:1px solid var(--line-strong);
+  border-radius:4px;
+  padding:7px 9px;
+  font-size:13px;
+  color:var(--ink);
+}
+.textarea{min-height:68px;resize:vertical;line-height:1.45}
+.input::placeholder,.textarea::placeholder{color:var(--faint)}
+.help-text{font-size:11px;color:var(--muted);margin-top:4px}
+.btn{
+  border-radius:var(--radius);
+  border:1px solid var(--line-strong);
+  background:var(--surface);
+  padding:7px 11px;
+  font-size:12px;
+  cursor:pointer;
+  color:var(--ink-2);
+  white-space:nowrap;
+}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-primary{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:var(--on-accent);
+  font-weight:650;
+}
+.btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover);color:var(--on-accent)}
+.btn-danger{background:transparent;border-color:var(--danger);color:var(--danger)}
+.btn-danger:hover{background:var(--danger);color:var(--on-danger)}
+.btn-sm{padding:4px 8px;font-size:11px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:disabled:hover{border-color:var(--line-strong);color:var(--ink-2)}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.segmented{
+  display:inline-flex;
+  gap:4px;
+  background:var(--bg-soft);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:3px;
+}
+.segmented button{
+  background:transparent;
+  border:0;
+  border-radius:4px;
+  padding:5px 10px;
+  font-family:var(--font-mono);
+  font-size:11px;
+  color:var(--muted);
+  cursor:pointer;
+}
+.segmented button.is-active{background:var(--surface-2);color:var(--accent);font-weight:700;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+
+/* 网关 tab */
+.gateway-layout{display:grid;gap:12px}
+.result-empty{
+  border:1px dashed var(--line-strong);
+  border-radius:var(--radius);
+  padding:18px;
+  text-align:center;
+  color:var(--muted);
+  font-size:12px;
+}
+.match-head{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-bottom:10px;
+}
+.path-pill{
+  font-family:var(--font-mono);
+  font-size:11px;
+  background:var(--accent-soft);
+  color:var(--accent);
+  border:1px solid var(--accent);
+  padding:3px 7px;
+  border-radius:4px;
+}
+.match-note{font-size:11px;color:var(--muted)}
+.skill-result-list{display:grid;gap:8px}
+.skill-result{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:9px 10px;
+  background:var(--surface);
+}
+.skill-result .skill-main{flex:1;min-width:0}
+.skill-result strong{font-size:12px;font-family:var(--font-mono)}
+.skill-result p{margin:3px 0 0;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.json-pre{
+  background:var(--bar-bg);
+  color:var(--bar-ink);
+  border-radius:var(--radius);
+  padding:11px;
+  font-family:var(--font-mono);
+  font-size:10.5px;
+  line-height:1.55;
+  overflow:auto;
+  max-height:240px;
+  margin:10px 0 0;
+  white-space:pre;
+}
+details.raw-toggle{margin-top:10px}
+details.raw-toggle summary{font-size:11px;color:var(--muted);cursor:pointer}
+.file-list{display:grid;gap:5px;margin-top:9px}
+.file-list .file-row{
+  display:flex;
+  gap:8px;
+  align-items:baseline;
+  font-family:var(--font-mono);
+  font-size:11px;
+  border:1px solid var(--line);
+  border-radius:4px;
+  padding:5px 8px;
+  background:var(--surface);
+}
+.file-list .file-row span:first-child{color:var(--accent);font-weight:700}
+.file-list .file-row span:last-child{margin-left:auto;color:var(--muted);font-size:10px}
+.file-preview{
+  margin-top:8px;
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:4px;
+  padding:8px;
+  font-size:11px;
+  color:var(--muted);
+  white-space:pre-wrap;
+  max-height:120px;
+  overflow:auto;
+}
+.prompt-card{font-size:12px}
+.prompt-card .prompt-line{display:flex;gap:8px;align-items:flex-start}
+.prompt-card .prompt-mark{font-family:var(--font-mono);font-size:10px;color:var(--accent);flex:0 0 auto}
+.prompt-card.off{border-color:var(--line-strong);opacity:.82}
+
+/* 场景树管理 */
+.catalog-layout{
+  display:grid;
+  grid-template-columns:minmax(200px,.9fr) minmax(250px,1.1fr);
+  gap:12px;
+  align-items:start;
+}
+.tree-card{position:sticky;top:0}
+.tree{display:grid;gap:2px}
+.tree-row{
+  display:flex;
+  align-items:center;
+  gap:4px;
+  min-width:0;
+  padding:5px 6px;
+  border-radius:4px;
+  cursor:pointer;
+  border:1px solid transparent;
+}
+.tree-row:hover{background:var(--bg-soft)}
+.tree-row.is-selected{background:var(--accent-soft);border-color:var(--accent)}
+.tree-row .depth-indent{flex:0 0 auto}
+.twisty{
+  width:18px;height:18px;
+  flex:0 0 auto;
+  display:grid;place-items:center;
+  background:transparent;
+  border:0;
+  color:var(--muted);
+  cursor:pointer;
+  font-size:9px;
+  padding:0;
+}
+.tree-row .tree-name{
+  flex:1;
+  min-width:0;
+  text-align:left;
+  background:transparent;
+  border:0;
+  padding:2px 0;
+  cursor:pointer;
+  font-size:12px;
+  color:var(--ink);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.tree-row.is-selected .tree-name{font-weight:700;color:var(--accent)}
+.tree-meta{font-family:var(--font-mono);font-size:9px;color:var(--muted);flex:0 0 auto;white-space:nowrap}
+.tree-actions{display:none;gap:3px;flex:0 0 auto}
+.tree-row:hover .tree-actions,.tree-row:focus-within .tree-actions{display:flex}
+.tree-empty{
+  border:1px dashed var(--line-strong);
+  border-radius:var(--radius);
+  padding:14px;
+  font-size:12px;
+  color:var(--muted);
+  text-align:center;
+}
+.scene-editor .scene-meta{margin-bottom:9px}
+.section-label{
+  font-size:10px;
+  letter-spacing:.08em;
+  color:var(--muted);
+  margin:13px 0 7px;
+  text-transform:uppercase;
+  font-family:var(--font-mono);
+}
+.chip-row{display:flex;flex-wrap:wrap;gap:6px}
+.chip{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  background:var(--accent-soft);
+  border:1px solid var(--accent);
+  color:var(--accent);
+  border-radius:999px;
+  padding:3px 8px;
+  font-size:11px;
+  font-family:var(--font-mono);
+}
+.chip button{
+  background:transparent;
+  border:0;
+  color:var(--accent);
+  cursor:pointer;
+  font-size:12px;
+  line-height:1;
+  padding:0;
+}
+.chip-row .empty{font-size:11px;color:var(--muted)}
+.attach-row{display:flex;gap:8px}
+.attach-row .select{flex:1;min-width:0}
+.child-scene-list{display:grid;gap:6px}
+.child-scene-row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  border:1px solid var(--line);
+  border-radius:4px;
+  padding:6px 8px;
+  font-size:12px;
+  background:var(--surface);
+}
+.child-scene-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.danger-zone{
+  border:1px dashed var(--danger);
+  border-radius:var(--radius);
+  padding:10px;
+  margin-top:14px;
+  background:var(--danger-soft);
+}
+.danger-zone p{margin:0 0 8px;font-size:11px;color:var(--danger)}
+.skill-catalog-list{display:grid;gap:8px}
+.skill-catalog-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:8px;
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:9px 10px;
+  background:var(--surface);
+}
+.skill-catalog-row .skill-main{min-width:0}
+.skill-catalog-row .skill-title{display:flex;align-items:baseline;gap:8px;min-width:0}
+.skill-catalog-row .skill-title strong{font-family:var(--font-mono);font-size:12px}
+.skill-catalog-row .skill-title .file-count{font-family:var(--font-mono);font-size:9px;color:var(--muted)}
+.skill-catalog-row p{margin:3px 0 0;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.skill-catalog-row .skill-paths{font-family:var(--font-mono);font-size:9px;color:var(--faint);margin-top:5px;white-space:normal;line-height:1.5}
+.upload-report{border-left:3px solid var(--warning);background:var(--warning-soft);border-radius:var(--radius);padding:10px 12px;font-size:11px;margin-bottom:12px}
+.upload-report.ok{border-left-color:var(--accent);background:var(--accent-soft)}
+.upload-report ul{margin:6px 0 0;padding-left:16px}
+.upload-report li{margin:2px 0;color:var(--ink-2)}
+.upload-report li.reason{color:var(--danger)}
+
+/* 统计 tab */
+.stats-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.filter-chips{display:inline-flex;gap:4px;background:var(--bg-soft);border:1px solid var(--line);border-radius:var(--radius);padding:3px}
+.filter-chips button{
+  background:transparent;
+  border:0;
+  border-radius:4px;
+  padding:4px 9px;
+  font-size:11px;
+  color:var(--muted);
+  cursor:pointer;
+}
+.filter-chips button.is-active{background:var(--surface-2);color:var(--accent);font-weight:700}
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+.timeline-card{grid-column:1 / -1}
+.timeline-list{display:grid;gap:7px}
+.timeline-item{
+  display:grid;
+  grid-template-columns:64px 1fr;
+  gap:8px;
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:7px 9px;
+  background:var(--surface);
+  font-size:11px;
+}
+.timeline-time{font-family:var(--font-mono);font-size:10px;color:var(--muted);padding-top:1px}
+.timeline-main{min-width:0}
+.timeline-main strong{font-family:var(--font-mono);font-size:11px}
+.timeline-path{font-family:var(--font-mono);font-size:9px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-badge{
+  display:inline-flex;
+  font-family:var(--font-mono);
+  font-size:9px;
+  padding:1px 6px;
+  border-radius:3px;
+  margin-left:7px;
+  vertical-align:1px;
+}
+.source-gateway{background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent)}
+.source-agent{background:var(--agent-source-soft);color:var(--agent-source);border:1px solid var(--agent-source)}
+.stat-table{width:100%;border-collapse:collapse;font-size:11px}
+.stat-table th{
+  text-align:left;
+  font-family:var(--font-mono);
+  font-size:9px;
+  letter-spacing:.06em;
+  color:var(--muted);
+  font-weight:500;
+  padding:0 4px 7px;
+}
+.stat-table td{padding:7px 4px;vertical-align:middle;border-top:1px solid var(--line)}
+.stat-table td:last-child{text-align:right}
+.stat-name{font-family:var(--font-mono);font-size:11px;font-weight:650}
+.stat-num{font-family:var(--font-mono);font-size:11px;color:var(--ink-2)}
+.stat-share{font-family:var(--font-mono);font-size:10px;color:var(--muted)}
+.inline-bar{height:3px;background:var(--accent);border-radius:2px;margin-top:3px;max-width:120px}
+.table-scroll{overflow:auto}
+.table-note{font-size:10px;color:var(--muted);margin-top:8px}
+
+/* 状态抽屉 */
+.state-drawer{
+  position:absolute;
+  left:0;right:0;bottom:37px;
+  height:min(380px,52%);
+  background:var(--surface-2);
+  border-top:1px solid var(--line);
+  padding:12px 16px;
+  overflow:auto;
+  display:none;
+  z-index:21;
+}
+.state-drawer.is-open{display:block}
+.state-drawer .json-pre{margin:0;max-height:calc(100% - 26px)}
+
+/* dialog / toast */
+dialog.confirm{
+  border:1px solid var(--line-strong);
+  border-radius:8px;
+  background:var(--surface-2);
+  color:var(--ink);
+  padding:0;
+  width:min(430px,92vw);
+}
+dialog.confirm::backdrop{background:rgba(10,16,14,.5)}
+.confirm-body{padding:16px 16px 6px}
+.confirm-body h3{margin:0 0 8px;font-size:15px}
+.confirm-body p{margin:0;font-size:13px;color:var(--ink-2);white-space:pre-line}
+.confirm-actions{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px 16px}
+.toast-stack{
+  position:fixed;
+  left:50%;
+  bottom:20px;
+  transform:translateX(-50%);
+  display:grid;
+  gap:7px;
+  z-index:40;
+  width:min(440px,92vw);
+}
+.toast{
+  background:var(--bar-bg);
+  color:var(--bar-ink);
+  border-left:3px solid var(--accent);
+  border-radius:var(--radius);
+  padding:9px 12px;
+  font-size:12px;
+  box-shadow:var(--shadow);
+}
+.toast.error{border-left-color:var(--danger)}
+
+/* 响应式 */
+@media (max-width:1180px){
+  :root{--panel-w:min(620px,92vw)}
+  .catalog-layout{grid-template-columns:1fr}
+  .tree-card{position:static}
+  .stats-grid{grid-template-columns:1fr}
+}
+@media (max-width:760px){
+  .rail{width:62px;padding:10px 8px;align-items:center}
+  .rail-brand{justify-content:center;padding:2px 0 8px;width:100%}
+  .brand-name,.brand-sub,.rail-nav button span,.rail-entry .entry-title,.rail-entry .entry-state{display:none}
+  .rail-nav{width:100%}
+  .rail-nav button{text-align:center;padding:9px 4px;font-family:var(--font-mono);font-size:10px}
+  .rail-entry{padding:9px 4px;display:grid;place-items:center}
+  .proto-bar p{display:none}
+  .stage-head{flex-direction:column;gap:10px}
+  .msg{max-width:96%}
+  .panel{width:100%}
+  .route-lane{grid-template-columns:1fr}
+  .route-track{flex-wrap:wrap;gap:6px}
+  .route-wire{display:none}
+}
+@media (prefers-reduced-motion: reduce){
+  *{transition:none !important;animation:none !important}
+  .panel{transition:none}
+}
+</style>
+</head>
+<body>
+<header class="proto-bar">
+  <span class="proto-badge">PROTOTYPE</span>
+  <p>一次性原型，状态仅存内存，刷新即重置。原型问题：面板入口、场景树管理与统计工作流在真实面板密度下是否顺手。</p>
+  <span class="bar-gap"></span>
+  <span class="mono" id="proto-config">config: enabled=true</span>
+  <div class="proto-actions">
+    <button class="proto-btn" data-action="open-panel">打开面板</button>
+    <button class="proto-btn" data-action="reset-demo">重置演示数据</button>
+  </div>
+</header>
+
+<div class="app">
+  <aside class="rail" aria-label="Harness 侧边栏">
+    <div class="rail-brand">
+      <span class="brand-mark">SG</span>
+      <div>
+        <div class="brand-name">DeepSeek Harness</div>
+        <div class="brand-sub">skill-gateway repo</div>
+      </div>
+    </div>
+    <nav class="rail-nav">
+      <button class="is-active"><span>会话</span></button>
+      <button><span>文件</span></button>
+      <button><span>扩展</span></button>
+      <button><span>设置</span></button>
+    </nav>
+    <div class="rail-spacer"></div>
+    <button class="rail-entry" id="rail-entry" data-action="open-panel" aria-haspopup="dialog" aria-expanded="false">
+      <span class="entry-top">
+        <span class="gate-glyph"><i></i></span>
+        <span class="entry-title">Skill Gateway</span>
+      </span>
+      <span class="entry-state" id="rail-entry-state"></span>
+    </button>
+  </aside>
+
+  <main class="stage">
+    <header class="stage-head">
+      <div>
+        <h1>会话</h1>
+        <p class="hint" id="stage-hint"></p>
+      </div>
+      <button class="open-panel-btn" data-action="open-panel">打开 Skill Gateway</button>
+    </header>
+    <div class="transcript" id="transcript">
+      <div class="transcript-inner" id="transcript-inner"></div>
+    </div>
+  </main>
+
+  <section class="panel" id="panel" aria-hidden="true">
+    <header class="panel-head">
+      <div>
+        <div class="panel-kicker">CLIENT ADAPTER</div>
+        <h2 class="panel-title">Skill Gateway</h2>
+      </div>
+      <div class="head-gap"></div>
+      <button class="switch" role="switch" aria-checked="true" data-action="toggle-gateway" aria-label="网关开关">
+        <span class="track"><span class="knob"></span></span>
+        <span class="switch-label" id="toggle-label">网关已开启</span>
+      </button>
+      <button class="icon-btn" data-action="close-panel" aria-label="关闭面板">×</button>
+    </header>
+
+    <div class="route-strip" id="route-strip"></div>
+
+    <nav class="panel-tabs" aria-label="面板 tab">
+      <button class="tab-btn is-active" data-action="switch-tab" data-tab="catalog">场景树管理</button>
+      <button class="tab-btn" data-action="switch-tab" data-tab="stats">统计</button>
+      <button class="tab-btn" data-action="switch-tab" data-tab="gateway">网关</button>
+    </nav>
+
+    <div class="panel-body" id="panel-body"></div>
+
+    <div class="state-drawer" id="state-drawer"></div>
+    <footer class="panel-foot">
+      <span>最后动作</span>
+      <span class="last-event" id="last-event">初始状态已就绪</span>
+      <button class="btn btn-sm" data-action="toggle-state-drawer">内存状态</button>
+    </footer>
+  </section>
+</div>
+
+<dialog class="confirm" id="confirm-dialog">
+  <div class="confirm-body">
+    <h3 id="confirm-title">确认</h3>
+    <p id="confirm-text"></p>
+  </div>
+  <div class="confirm-actions">
+    <button class="btn" id="confirm-cancel">取消</button>
+    <button class="btn btn-primary" id="confirm-ok">确认</button>
+  </div>
+</dialog>
+
+<div class="toast-stack" id="toast-stack"></div>
+
+<input type="file" id="folder-input" webkitdirectory multiple hidden>
+<input type="file" id="zip-input" accept=".zip,application/zip" multiple hidden>
+
+<script>
+"use strict";
+
+/* ============================================================
+ * 1. 可移植的核心模块（纯函数 / 纯 JSON，不碰 DOM）
+ * ============================================================ */
+const Core = (() => {
+  const NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+  function clone(value){
+    return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+  }
+
+  function makeId(prefix){
+    return prefix + "_" + Math.random().toString(36).slice(2, 9);
+  }
+
+  function normalize(value){
+    return String(value || "").toLowerCase().normalize("NFKC");
+  }
+
+  function tokenize(text){
+    const raw = normalize(text).replace(/[^\p{Script=Han}a-z0-9\s-]/gu, " ");
+    const tokens = new Set();
+    const latin = raw.match(/[a-z0-9][a-z0-9-]*/g) || [];
+    latin.forEach((t) => tokens.add(t));
+    const cjkRuns = raw.match(/\p{Script=Han}+/gu) || [];
+    cjkRuns.forEach((run) => {
+      tokens.add(run);
+      if (run.length >= 2){
+        for (let i = 0; i < run.length - 1; i += 1){
+          tokens.add(run.slice(i, i + 2));
+        }
+      }
+    });
+    return [...tokens].filter((t) => t.length >= 2);
+  }
+
+  function tokenWeight(token){
+    if (token.length >= 3) return 2;
+    return 1;
+  }
+
+  function sceneMatchScore(scene, tokens){
+    const name = normalize(scene.name);
+    const desc = normalize(scene.description);
+    const tags = (scene.tags || []).map(normalize);
+    let score = 0;
+    tokens.forEach((token) => {
+      const weight = tokenWeight(token);
+      if (name.includes(token)) score += weight * 4;
+      if (desc.includes(token)) score += weight;
+      tags.forEach((tag) => {
+        if (tag.includes(token)) score += weight * 2;
+      });
+    });
+    return score;
+  }
+
+  function skillMatchScore(skill, tokens){
+    if (!skill) return 0;
+    const name = normalize(skill.name);
+    const desc = normalize(skill.description);
+    let score = 0;
+    tokens.forEach((token) => {
+      const weight = tokenWeight(token);
+      if (name.includes(token)) score += weight * 2;
+      if (desc.includes(token)) score += weight;
+    });
+    return score;
+  }
+
+  function scenePath(catalog, sceneId){
+    const names = [];
+    let cursor = catalog.scenes[sceneId];
+    let guard = 0;
+    while (cursor && guard < 64){
+      names.unshift(cursor.name);
+      if (!cursor.parentId) break;
+      cursor = catalog.scenes[cursor.parentId];
+      guard += 1;
+    }
+    return names.join(" / ");
+  }
+
+  function collectSubtree(catalog, sceneId){
+    const groups = [];
+    const skills = [];
+    const sceneIds = [];
+    const seenSkills = new Set();
+    const queue = [sceneId];
+    while (queue.length){
+      const id = queue.shift();
+      const scene = catalog.scenes[id];
+      if (!scene) continue;
+      sceneIds.push(id);
+      const direct = [];
+      (scene.skills || []).forEach((name) => {
+        const skill = catalog.skills[name];
+        if (!skill || seenSkills.has(name)) return;
+        seenSkills.add(name);
+        direct.push({ name: skill.name, description: skill.description });
+      });
+      if (direct.length){
+        groups.push({ sceneId: id, path: scenePath(catalog, id), skills: direct });
+      }
+      skills.push(...direct);
+      queue.push(...(scene.children || []));
+    }
+    return { sceneIds, groups, skills };
+  }
+
+  function sceneDepth(catalog, sceneId){
+    let depth = 0;
+    let cursor = catalog.scenes[sceneId];
+    while (cursor && cursor.parentId && catalog.scenes[cursor.parentId]){
+      depth += 1;
+      cursor = catalog.scenes[cursor.parentId];
+    }
+    return depth;
+  }
+
+  function find(catalog, purpose){
+    const tokens = tokenize(purpose);
+    if (!tokens.length){
+      return { ok: true, purpose, matchedSceneId: null, matchedScenePath: null, matchType: null, groups: [], skills: [], message: "purpose 为空，无法匹配。请输入目的描述。" };
+    }
+
+    const scenes = Object.values(catalog.scenes);
+    const ranked = scenes.map((scene) => {
+      const primary = sceneMatchScore(scene, tokens);
+      const subtree = collectSubtree(catalog, scene.id);
+      const secondary = subtree.skills.reduce((best, skill) => Math.max(best, skillMatchScore(skill, tokens)), 0);
+      return { scene, primary, secondary, depth: sceneDepth(catalog, scene.id) };
+    }).filter((item) => item.primary > 0 || item.secondary > 0)
+      .sort((a, b) => (b.primary - a.primary) || (b.secondary - a.secondary) || (b.depth - a.depth));
+
+    if (!ranked.length){
+      return { ok: true, purpose, matchedSceneId: null, matchedScenePath: null, matchType: null, groups: [], skills: [], message: "没有匹配的场景或技能。换一个目的描述，或先去「场景树管理」扩充目录。" };
+    }
+
+    const best = ranked[0];
+    const subtree = collectSubtree(catalog, best.scene.id);
+    let groups = subtree.groups;
+    let skills = subtree.skills;
+    if (best.primary === 0){
+      const matchedNames = new Set(
+        subtree.skills
+          .filter((skill) => skillMatchScore(skill, tokens) > 0)
+          .map((skill) => skill.name)
+      );
+      groups = subtree.groups
+        .map((group) => ({ ...group, skills: group.skills.filter((skill) => matchedNames.has(skill.name)) }))
+        .filter((group) => group.skills.length);
+      skills = groups.flatMap((group) => group.skills);
+    }
+    return {
+      ok: true,
+      purpose,
+      tokens,
+      matchedSceneId: best.scene.id,
+      matchedScenePath: scenePath(catalog, best.scene.id),
+      matchType: best.primary > 0 ? "scene" : "skill-secondary",
+      scenePrimaryScore: best.primary,
+      skillSecondaryScore: best.secondary,
+      groups,
+      skills,
+      message: null
+    };
+  }
+
+  function browse(catalog, sceneId){
+    const rootId = catalog.rootSceneId;
+    const id = sceneId && catalog.scenes[sceneId] ? sceneId : rootId;
+    const scene = catalog.scenes[id];
+    if (!scene){
+      return { ok: false, error: "场景不存在。" };
+    }
+    const children = (scene.children || []).map((childId) => {
+      const child = catalog.scenes[childId];
+      return child ? {
+        id: child.id,
+        name: child.name,
+        description: child.description,
+        tags: child.tags,
+        childCount: (child.children || []).length,
+        skillCount: (child.skills || []).length
+      } : null;
+    }).filter(Boolean);
+    const skills = (scene.skills || []).map((name) => {
+      const skill = catalog.skills[name];
+      return skill ? { name: skill.name, description: skill.description } : null;
+    }).filter(Boolean);
+    return {
+      ok: true,
+      sceneId: scene.id,
+      path: scenePath(catalog, scene.id),
+      name: scene.name,
+      description: scene.description,
+      tags: scene.tags || [],
+      children,
+      skills
+    };
+  }
+
+  function createScene(catalog, parentId, input){
+    const next = clone(catalog);
+    const parent = next.scenes[parentId];
+    if (!parent) return { ok: false, error: "父场景不存在。" };
+    const id = makeId("scene");
+    next.scenes[id] = {
+      id,
+      name: String(input.name || "").trim() || "未命名场景",
+      description: String(input.description || "").trim(),
+      tags: String(input.tags || "").split(",").map((t) => t.trim()).filter(Boolean),
+      parentId,
+      children: [],
+      skills: []
+    };
+    parent.children.push(id);
+    return { ok: true, catalog: next, sceneId: id };
+  }
+
+  function updateScene(catalog, sceneId, input){
+    const next = clone(catalog);
+    const scene = next.scenes[sceneId];
+    if (!scene) return { ok: false, error: "场景不存在。" };
+    if (typeof input.name === "string") scene.name = input.name.trim() || scene.name;
+    if (typeof input.description === "string") scene.description = input.description.trim();
+    if (typeof input.tags === "string"){
+      scene.tags = input.tags.split(",").map((t) => t.trim()).filter(Boolean);
+    }
+    return { ok: true, catalog: next };
+  }
+
+  function collectDescendants(catalog, sceneId){
+    const ids = [];
+    const queue = [sceneId];
+    while (queue.length){
+      const id = queue.shift();
+      const scene = catalog.scenes[id];
+      if (!scene) continue;
+      ids.push(id);
+      queue.push(...(scene.children || []));
+    }
+    return ids;
+  }
+
+  function deleteScene(catalog, sceneId){
+    const next = clone(catalog);
+    if (sceneId === next.rootSceneId){
+      return { ok: false, error: "根场景不能删除。" };
+    }
+    if (!next.scenes[sceneId]){
+      return { ok: false, error: "场景不存在。" };
+    }
+    const ids = collectDescendants(next, sceneId);
+    const parent = next.scenes[next.scenes[sceneId].parentId];
+    if (parent){
+      parent.children = parent.children.filter((id) => id !== sceneId);
+    }
+    ids.forEach((id) => delete next.scenes[id]);
+    return { ok: true, catalog: next, deletedIds: ids };
+  }
+
+  function attachSkill(catalog, sceneId, skillName){
+    const next = clone(catalog);
+    const scene = next.scenes[sceneId];
+    if (!scene) return { ok: false, error: "场景不存在。" };
+    if (!next.skills[skillName]) return { ok: false, error: "技能不存在。" };
+    if (!scene.skills.includes(skillName)) scene.skills.push(skillName);
+    return { ok: true, catalog: next };
+  }
+
+  function detachSkill(catalog, sceneId, skillName){
+    const next = clone(catalog);
+    const scene = next.scenes[sceneId];
+    if (!scene) return { ok: false, error: "场景不存在。" };
+    scene.skills = (scene.skills || []).filter((name) => name !== skillName);
+    return { ok: true, catalog: next };
+  }
+
+  function upsertSkill(catalog, name, description, now = Date.now()){
+    const next = clone(catalog);
+    const existing = next.skills[name];
+    next.skills[name] = {
+      name,
+      description: String(description || "").trim(),
+      createdAt: existing ? existing.createdAt : now,
+      updatedAt: now
+    };
+    return { ok: true, catalog: next, updated: Boolean(existing) };
+  }
+
+  function deleteSkill(catalog, skillName){
+    const next = clone(catalog);
+    if (!next.skills[skillName]) return { ok: false, error: "技能不存在。" };
+    delete next.skills[skillName];
+    Object.values(next.scenes).forEach((scene) => {
+      scene.skills = (scene.skills || []).filter((name) => name !== skillName);
+    });
+    return { ok: true, catalog: next };
+  }
+
+  function loadSkillFiles(skillFiles, skillName){
+    const files = skillFiles[skillName];
+    if (!files) return { ok: false, error: "技能「" + skillName + "」的文件不存在。" };
+    return { ok: true, skillName, files: clone(files) };
+  }
+
+  function recordUsage(usage, input, now = Date.now()){
+    const record = {
+      id: makeId("use"),
+      skillName: input.skillName,
+      source: input.source === "agent-skills" ? "agent-skills" : "gateway",
+      timestamp: input.timestamp || now,
+      sessionId: input.sessionId || "session"
+    };
+    if (input.scenePath) record.scenePath = input.scenePath;
+    return [...usage, record];
+  }
+
+  function aggregateUsage(usage, sourceFilter = "all"){
+    const filtered = sourceFilter === "all"
+      ? usage
+      : usage.filter((record) => record.source === sourceFilter);
+    const bySkill = new Map();
+    const byScene = new Map();
+    filtered.forEach((record) => {
+      let skill = bySkill.get(record.skillName);
+      if (!skill){
+        skill = { skillName: record.skillName, count: 0, lastUsed: 0 };
+        bySkill.set(record.skillName, skill);
+      }
+      skill.count += 1;
+      skill.lastUsed = Math.max(skill.lastUsed, record.timestamp);
+      if (record.scenePath){
+        let scene = byScene.get(record.scenePath);
+        if (!scene){
+          scene = { scenePath: record.scenePath, count: 0, lastUsed: 0 };
+          byScene.set(record.scenePath, scene);
+        }
+        scene.count += 1;
+        scene.lastUsed = Math.max(scene.lastUsed, record.timestamp);
+      }
+    });
+    const total = filtered.length;
+    const skills = [...bySkill.values()].sort((a, b) => (b.count - a.count) || (b.lastUsed - a.lastUsed));
+    const scenes = [...byScene.values()].sort((a, b) => (b.count - a.count) || (b.lastUsed - a.lastUsed));
+    return { total, skills, scenes };
+  }
+
+  function parseFrontmatter(markdown){
+    const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(markdown || "");
+    if (!match){
+      return { ok: false, reasons: ["SKILL.md 缺少 frontmatter（需以 --- 开头和结束）"] };
+    }
+    const fields = {};
+    match[1].split(/\r?\n/).forEach((line) => {
+      const idx = line.indexOf(":");
+      if (idx <= 0) return;
+      const key = line.slice(0, idx).trim();
+      let value = line.slice(idx + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))){
+        value = value.slice(1, -1);
+      }
+      fields[key] = value;
+    });
+    return { ok: true, fields };
+  }
+
+  function validateUpload(input){
+    const paths = (input.files || [])
+      .map((file) => String(file.path || "").replace(/\\/g, "/").replace(/^\.\//, ""))
+      .filter((path) => path && !path.endsWith("/"));
+
+    if (!paths.length){
+      return { ok: false, reasons: ["压缩包或文件夹为空。"], name: null };
+    }
+
+    const firstSegments = new Set(paths.map((path) => path.split("/")[0]));
+    let root = "";
+    let relativePaths = paths;
+    if (firstSegments.size === 1 && !paths.includes("SKILL.md")){
+      const candidate = [...firstSegments][0];
+      const rootSkill = paths.find((path) => path === candidate + "/SKILL.md");
+      if (rootSkill){
+        root = candidate;
+        relativePaths = paths.map((path) => path.slice(candidate.length + 1));
+      }
+    }
+
+    const reasons = [];
+    const rootSkillPaths = relativePaths.filter((path) => path === "SKILL.md");
+    if (rootSkillPaths.length !== 1){
+      reasons.push("根目录必须且只能有 1 个 SKILL.md，当前 " + rootSkillPaths.length + " 个。");
+    }
+
+    if (reasons.length){
+      return { ok: false, reasons, name: input.name };
+    }
+
+    const skillFile = input.files.find((file) => {
+      const path = String(file.path || "").replace(/\\/g, "/").replace(/^\.\//, "");
+      const rel = root ? path.slice(root.length + 1) : path;
+      return rel === "SKILL.md";
+    });
+    const parsed = parseFrontmatter(skillFile && skillFile.content);
+    if (!parsed.ok){
+      reasons.push(...parsed.reasons);
+    } else {
+      const name = String(parsed.fields.name || "").trim();
+      const description = String(parsed.fields.description || "").trim();
+      if (!name){
+        reasons.push("frontmatter 缺少 name。");
+      } else if (!NAME_RE.test(name)){
+        reasons.push("name 不符合 [a-z0-9][a-z0-9-]*（小写字母、数字、连字符，且不能以连字符开头）。");
+      }
+      if (!description){
+        reasons.push("frontmatter 缺少非空 description。");
+      }
+    }
+
+    if (reasons.length){
+      return { ok: false, reasons, name: input.name };
+    }
+
+    const files = {};
+    input.files.forEach((file) => {
+      const path = String(file.path || "").replace(/\\/g, "/").replace(/^\.\//, "");
+      const rel = root ? path.slice(root.length + 1) : path;
+      if (rel) files[rel] = file.content;
+    });
+    const parsedOk = parseFrontmatter(skillFile.content);
+    const skill = {
+      name: String(parsedOk.fields.name).trim(),
+      description: String(parsedOk.fields.description).trim(),
+      files
+    };
+    return { ok: true, skill, name: input.name };
+  }
+
+  function skillPaths(catalog, skillName){
+    return Object.values(catalog.scenes)
+      .filter((scene) => (scene.skills || []).includes(skillName))
+      .map((scene) => scenePath(catalog, scene.id));
+  }
+
+  return {
+    NAME_RE,
+    clone,
+    makeId,
+    tokenize,
+    find,
+    browse,
+    createScene,
+    updateScene,
+    deleteScene,
+    attachSkill,
+    detachSkill,
+    upsertSkill,
+    deleteSkill,
+    loadSkillFiles,
+    recordUsage,
+    aggregateUsage,
+    validateUpload,
+    parseFrontmatter,
+    scenePath,
+    skillPaths
+  };
+})();
+
+/* ============================================================
+ * 2. 演示数据（内存态）
+ * ============================================================ */
+function seedCatalog(){
+  App.skillFiles = {};
+  const catalog = { version: 1, rootSceneId: "root", scenes: {}, skills: {} };
+  const now = Date.now();
+
+  const addScene = (id, name, description, tags, parentId, skills = []) => {
+    catalog.scenes[id] = { id, name, description, tags, parentId, children: [], skills: [...skills] };
+    if (parentId && catalog.scenes[parentId]) catalog.scenes[parentId].children.push(id);
+    return id;
+  };
+
+  const addSkill = (name, description, files = {}) => {
+    catalog.skills[name] = { name, description, createdAt: now - 86400000 * 7, updatedAt: now - 86400000 * 2 };
+    App.skillFiles[name] = files;
+  };
+
+  addScene("root", "工作台", "所有场景的单一根节点，场景树从这里展开。", ["workspace"], null);
+  addScene("backend", "后端开发", "服务端实现、数据模型、接口契约与工程化。", ["backend", "server"], "root");
+  addScene("database", "数据库设计", "关系模型、约束、索引与 schema 演进评审。", ["database", "sql", "schema"], "backend");
+  addScene("api", "接口设计", "HTTP 契约、错误模型与版本策略。", ["api", "http", "contract"], "backend");
+  addScene("frontend", "前端开发", "页面结构、交互与视觉实现。", ["frontend", "ui"], "root");
+  addScene("ui", "界面设计", "视觉方向、布局系统与前端细节打磨。", ["ui", "visual", "css"], "frontend");
+  addScene("quality", "工程质量", "评审、测试与长期可维护性。", ["quality", "review", "testing"], "root");
+
+  addSkill("db-schema-design", "从领域对象出发设计关系表结构、约束与索引，并评审 schema 演进。", {
+    "SKILL.md": `---
+name: db-schema-design
+description: 从领域对象出发设计关系表结构、约束与索引，并评审 schema 演进。
+---
+
+# DB Schema Design
+
+1. 识别聚合根和值对象，再决定表边界。
+2. 每个外键写清删除策略。
+3. 索引只为真实查询路径服务。
+`,
+    "examples/orders.sql": `CREATE TABLE orders (
+  id BIGINT PRIMARY KEY,
+  buyer_id BIGINT NOT NULL REFERENCES buyers(id),
+  status TEXT NOT NULL DEFAULT 'draft'
+);
+CREATE INDEX idx_orders_buyer ON orders(buyer_id);`
+  });
+  addSkill("sql-query-review", "评审慢查询、缺失索引与危险写操作，给出可执行改写。", {
+    "SKILL.md": `---
+name: sql-query-review
+description: 评审慢查询、缺失索引与危险写操作，给出可执行改写。
+---
+
+# SQL Query Review
+
+先读执行计划，再看谓词顺序与锁范围。
+`
+  });
+  addSkill("api-design-review", "检查接口契约的一致性、错误模型与分页约定。", {
+    "SKILL.md": `---
+name: api-design-review
+description: 检查接口契约的一致性、错误模型与分页约定。
+---
+
+# API Design Review
+
+以消费者视角检查路径、状态码和幂等性。
+`
+  });
+  addSkill("tdd", "先写失败测试，再写实现，小步重构。Red, green, refactor。", {
+    "SKILL.md": `---
+name: tdd
+description: 先写失败测试，再写实现，小步重构。Red, green, refactor。
+---
+
+# TDD
+
+Red, green, refactor.
+`
+  });
+  addSkill("frontend-design", "为页面建立明确的视觉方向：色板、字体、布局与签名元素。", {
+    "SKILL.md": `---
+name: frontend-design
+description: 为页面建立明确的视觉方向：色板、字体、布局与签名元素。
+---
+
+# Frontend Design
+
+先定方向，再写代码；只在一处冒险。
+`,
+    "tokens.css": `:root{
+  --accent:#2F6B56;
+  --radius:6px;
+}`
+  });
+  addSkill("web-design-guidelines", "按 Web Interface Guidelines 审计界面可达性与交互细节。", {
+    "SKILL.md": `---
+name: web-design-guidelines
+description: 按 Web Interface Guidelines 审计界面可达性与交互细节。
+---
+
+# Web Interface Guidelines
+
+检查键盘路径、焦点可见性与空状态。
+`
+  });
+  addSkill("code-review", "按变更风险读代码，先找行为差异，再谈风格。", {
+    "SKILL.md": `---
+name: code-review
+description: 按变更风险读代码，先找行为差异，再谈风格。
+---
+
+# Code Review
+
+先复现问题，再读 diff，最后检查测试覆盖。
+`
+  });
+
+  const attach = (sceneId, skillName) => {
+    const result = Core.attachSkill(catalog, sceneId, skillName);
+    if (result.ok) Object.assign(catalog, result.catalog);
+  };
+  attach("database", "db-schema-design");
+  attach("database", "sql-query-review");
+  attach("api", "api-design-review");
+  attach("frontend", "frontend-design");
+  attach("ui", "frontend-design");
+  attach("ui", "web-design-guidelines");
+  attach("backend", "tdd");
+  attach("backend", "code-review");
+  attach("quality", "code-review");
+
+  return catalog;
+}
+
+function seedUsage(){
+  const now = Date.now();
+  const minute = 60000;
+  const record = (skillName, source, scenePath, minutesAgo) => Core.recordUsage([], {
+    skillName, source, scenePath, timestamp: now - minutesAgo * minute, sessionId: App.sessionId
+  })[0];
+  return [
+    record("db-schema-design", "gateway", "工作台 / 后端开发 / 数据库设计", 70),
+    record("code-review", "agent-skills", null, 61),
+    record("frontend-design", "gateway", "工作台 / 前端开发 / 界面设计", 48),
+    record("sql-query-review", "gateway", "工作台 / 后端开发 / 数据库设计", 31),
+    record("tdd", "agent-skills", null, 17),
+    record("frontend-design", "agent-skills", null, 6)
+  ];
+}
+
+function seedTranscript(){
+  const now = Date.now();
+  const minute = 60000;
+  return [
+    { id: Core.makeId("evt"), time: now - 75 * minute, role: "system", text: "system prompt 已注入网关提示词：开始子任务前，先通过 skill_gateway 查询与目的匹配的技能，再按需加载全文。" },
+    { id: Core.makeId("evt"), time: now - 74 * minute, role: "user", text: "帮我评审订单库表设计，先看看有没有现成的技能。" },
+    { id: Core.makeId("evt"), time: now - 73 * minute, role: "tool", tool: "skill_gateway", action: "find", input: "数据库设计", summary: "命中场景「工作台 / 后端开发 / 数据库设计」，子树返回 2 个技能" },
+    { id: Core.makeId("evt"), time: now - 71 * minute, role: "tool", tool: "skill_gateway", action: "load", input: "db-schema-design", scenePath: "工作台 / 后端开发 / 数据库设计", summary: "返回 2 个文件：SKILL.md, examples/orders.sql" },
+    { id: Core.makeId("evt"), time: now - 70 * minute, role: "assistant", text: "已加载 db-schema-design，按检查清单开始评审。" },
+    { id: Core.makeId("evt"), time: now - 69 * minute, role: "usage", source: "gateway", skillName: "db-schema-design", scenePath: "工作台 / 后端开发 / 数据库设计" },
+    { id: Core.makeId("evt"), time: now - 61 * minute, role: "usage", source: "agent-skills", skillName: "code-review", scenePath: null },
+    { id: Core.makeId("evt"), time: now - 6 * minute, role: "usage", source: "agent-skills", skillName: "frontend-design", scenePath: null }
+  ];
+}
+
+/* ============================================================
+ * 3. 应用状态
+ * ============================================================ */
+const App = {
+  catalog: null,
+  skillFiles: {},
+  usage: [],
+  config: { enabled: true },
+  sessionId: "prototype-session-01",
+  panelOpen: false,
+  activeTab: "catalog",
+  selectedSceneId: "root",
+  collapsed: new Set(),
+  gatewayAction: "find",
+  gatewayPurpose: "数据库设计",
+  gatewayBrowseSceneId: "root",
+  gatewayLoadSkill: "db-schema-design",
+  gatewayResult: null,
+  sceneDraft: { name: "", description: "", tags: "" },
+  sourceFilter: "all",
+  uploadReport: [],
+  transcript: [],
+  lastEvent: "初始状态已就绪",
+  routePulse: false,
+  stateDrawerOpen: false
+};
+App.catalog = seedCatalog();
+App.usage = seedUsage();
+App.transcript = seedTranscript();
+App.gatewayLoadSkill = App.catalog.skills["db-schema-design"] ? "db-schema-design" : Object.keys(App.catalog.skills)[0];
+App.selectedSceneId = "database";
+
+function syncSceneDraft(){
+  const scene = App.catalog.scenes[App.selectedSceneId] || App.catalog.scenes[App.catalog.rootSceneId];
+  App.sceneDraft = {
+    name: scene.name,
+    description: scene.description,
+    tags: (scene.tags || []).join(", ")
+  };
+}
+syncSceneDraft();
+
+/* ============================================================
+ * 4. DOM 工具
+ * ============================================================ */
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+
+function esc(value){
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function fmtTime(ts){
+  return new Date(ts).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function fmtDateTime(ts){
+  return new Date(ts).toLocaleString("zh-CN", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function shortPath(path){
+  return String(path || "");
+}
+
+function toast(message, kind = "info"){
+  const stack = $("#toast-stack");
+  const node = document.createElement("div");
+  node.className = "toast" + (kind === "error" ? " error" : "");
+  node.textContent = message;
+  stack.appendChild(node);
+  setTimeout(() => node.remove(), 3600);
+}
+
+function confirmDialog({ title, text, confirmLabel = "确认", danger = false }){
+  const dialog = $("#confirm-dialog");
+  if (!dialog || typeof dialog.showModal !== "function"){
+    return Promise.resolve(window.confirm(text));
+  }
+  $("#confirm-title").textContent = title;
+  $("#confirm-text").textContent = text;
+  const ok = $("#confirm-ok");
+  const cancel = $("#confirm-cancel");
+  ok.textContent = confirmLabel;
+  ok.className = "btn " + (danger ? "btn-danger" : "btn-primary");
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      ok.removeEventListener("click", onOk);
+      cancel.removeEventListener("click", onCancel);
+      dialog.removeEventListener("close", onClose);
+    };
+    const onOk = () => { cleanup(); dialog.close("ok"); resolve(true); };
+    const onCancel = () => { cleanup(); dialog.close("cancel"); resolve(false); };
+    const onClose = () => { cleanup(); resolve(dialog.returnValue === "ok"); };
+    ok.addEventListener("click", onOk);
+    cancel.addEventListener("click", onCancel);
+    dialog.addEventListener("close", onClose);
+    dialog.showModal();
+  });
+}
+
+function serializeState(){
+  const files = {};
+  Object.keys(App.skillFiles).forEach((name) => {
+    files[name] = {};
+    Object.keys(App.skillFiles[name]).forEach((path) => {
+      const content = App.skillFiles[name][path];
+      if (typeof content === "string"){
+        files[name][path] = content.length > 180 ? content.slice(0, 180) + "…" : content;
+      } else {
+        files[name][path] = content;
+      }
+    });
+  });
+  return JSON.stringify({
+    catalog: App.catalog,
+    skillFiles: files,
+    usage: App.usage,
+    config: App.config,
+    ui: {
+      panelOpen: App.panelOpen,
+      activeTab: App.activeTab,
+      selectedSceneId: App.selectedSceneId,
+      collapsed: [...App.collapsed],
+      sourceFilter: App.sourceFilter,
+      gatewayAction: App.gatewayAction,
+      gatewayPurpose: App.gatewayPurpose
+    }
+  }, null, 2);
+}
+
+/* ============================================================
+ * 5. 渲染
+ * ============================================================ */
+function render(){
+  renderProtoBar();
+  renderRail();
+  renderStageHead();
+  renderTranscript();
+  renderPanel();
+}
+
+function renderProtoBar(){
+  $("#proto-config").textContent = "config: enabled=" + App.config.enabled + "  usage=" + App.usage.length + "  skills=" + Object.keys(App.catalog.skills).length;
+}
+
+function renderRail(){
+  const entry = $("#rail-entry");
+  entry.classList.toggle("is-open", App.config.enabled);
+  entry.setAttribute("aria-expanded", String(App.panelOpen));
+  const state = $("#rail-entry-state");
+  state.innerHTML = App.config.enabled
+    ? "状态 <b>已开启</b> / 统计观察器运行中"
+    : "状态 <b class=\"off\">已关闭</b> / 默认技能加载不变";
+}
+
+function renderStageHead(){
+  $("#stage-hint").innerHTML = App.config.enabled
+    ? "系统提示词已注入：<b>开始子任务前，先通过 skill_gateway 查询匹配技能，再按需加载全文。</b>"
+    : "网关已关闭：<b>skill_gateway 工具与提示词已卸载</b>，harness 默认技能加载保持原样，统计观察器仍继续记录。";
+}
+
+function renderTranscript(){
+  const box = $("#transcript-inner");
+  box.innerHTML = App.transcript.map((event) => {
+    const time = fmtTime(event.time);
+    if (event.role === "system"){
+      return `<div class="msg msg-system"><div class="msg-time">${time} system</div>${esc(event.text)}</div>`;
+    }
+    if (event.role === "user"){
+      return `<div class="msg msg-user"><div class="msg-time">${time} user</div>${esc(event.text)}</div>`;
+    }
+    if (event.role === "assistant"){
+      return `<div class="msg msg-assistant"><div class="msg-time">${time} assistant</div>${esc(event.text)}</div>`;
+    }
+    if (event.role === "tool"){
+      const body = event.action === "load"
+        ? `<div class="tool-body">${esc(event.summary)}</div>`
+        : `<div class="tool-body">${esc(event.summary)}</div>`;
+      return `<div class="msg msg-tool">
+        <div class="tool-head">
+          <span class="tool-name">${esc(event.tool)}.${esc(event.action)}</span>
+          <span class="tool-input">${esc(event.input)}</span>
+          <span class="tool-input">${time}</span>
+        </div>${body}
+      </div>`;
+    }
+    if (event.role === "usage"){
+      const path = event.scenePath ? "  scenePath=" + esc(event.scenePath) : "";
+      return `<div class="msg msg-observer">
+        <span class="observer-led"></span>
+        <span>${time} observer → ${esc(event.source)} skill=${esc(event.skillName)}${path}</span>
+      </div>`;
+    }
+    return "";
+  }).join("");
+  const transcript = $("#transcript");
+  if (transcript) transcript.scrollTop = transcript.scrollHeight;
+}
+
+function renderPanel(){
+  const panel = $("#panel");
+  panel.classList.toggle("is-open", App.panelOpen);
+  panel.setAttribute("aria-hidden", String(!App.panelOpen));
+  $("#rail-entry").setAttribute("aria-expanded", String(App.panelOpen));
+  renderPanelHead();
+  renderRouteStrip();
+  renderTabs();
+  renderPanelBody();
+  renderPanelFoot();
+  renderStateDrawer();
+}
+
+function renderPanelHead(){
+  const toggle = $(".switch");
+  toggle.setAttribute("aria-checked", String(App.config.enabled));
+  $("#toggle-label").textContent = App.config.enabled ? "网关已开启" : "网关已关闭";
+}
+
+function renderRouteStrip(){
+  const enabled = App.config.enabled;
+  const strip = $("#route-strip");
+  strip.innerHTML = `
+    <div class="route-lanes">
+      <div class="route-lane is-live">
+        <div class="lane-label">harness<br>默认技能</div>
+        <div class="route-track">
+          <span class="route-node">skill 工具</span>
+          <span class="route-wire is-live"></span>
+          <span class="route-node">agent-skills</span>
+          <span class="route-wire is-live"></span>
+          <span class="route-node">恒可用旁路</span>
+        </div>
+      </div>
+      <div class="route-lane ${enabled ? "is-live" : "is-off"}">
+        <div class="lane-label">gateway<br>网关技能</div>
+        <div class="route-track">
+          <span class="route-node">skill_gateway</span>
+          <span class="route-wire ${enabled ? "is-live" : ""}">${App.routePulse && enabled ? '<span class="route-pulse is-running"></span>' : ""}</span>
+          <span class="gate-node"><i></i></span>
+          <span class="route-wire ${enabled ? "is-live" : ""}"></span>
+          <span class="route-node">场景树</span>
+          <span class="route-wire ${enabled ? "is-live" : ""}"></span>
+          <span class="route-node">load 全文</span>
+        </div>
+      </div>
+    </div>
+    <div class="observer-row">
+      <span class="observer-led"></span>
+      <span>usage observer</span>
+      <span>恒开 / 双来源记录</span>
+    </div>`;
+}
+
+function renderTabs(){
+  $$(".tab-btn").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.tab === App.activeTab);
+  });
+}
+
+function renderPanelBody(){
+  const body = $("#panel-body");
+  if (App.activeTab === "gateway") body.innerHTML = renderGatewayTab();
+  if (App.activeTab === "catalog") body.innerHTML = renderCatalogTab();
+  if (App.activeTab === "stats") body.innerHTML = renderStatsTab();
+}
+
+function renderPanelFoot(){
+  $("#last-event").textContent = App.lastEvent;
+}
+
+function renderStateDrawer(){
+  const drawer = $("#state-drawer");
+  drawer.classList.toggle("is-open", App.stateDrawerOpen);
+  if (App.stateDrawerOpen){
+    drawer.innerHTML = `<div class="mono" style="font-size:10px;color:var(--muted);margin-bottom:6px">内存状态 / 纯 JSON 快照</div><pre class="json-pre">${esc(serializeState())}</pre>`;
+  } else {
+    drawer.innerHTML = "";
+  }
+}
+
+/* ---- 网关 tab ---- */
+function renderGatewayTab(){
+  const enabled = App.config.enabled;
+  const action = App.gatewayAction;
+  const sceneOptions = Object.values(App.catalog.scenes)
+    .map((scene) => `<option value="${esc(scene.id)}" ${scene.id === App.gatewayBrowseSceneId ? "selected" : ""}>${esc(Core.scenePath(App.catalog, scene.id))}</option>`)
+    .join("");
+  const skillOptions = Object.keys(App.catalog.skills)
+    .map((name) => `<option value="${esc(name)}" ${name === App.gatewayLoadSkill ? "selected" : ""}>${esc(name)}</option>`)
+    .join("");
+  const selectedSkill = App.catalog.skills[App.gatewayLoadSkill];
+  const pathOptions = selectedSkill
+    ? Core.skillPaths(App.catalog, selectedSkill.name)
+        .map((path) => `<option value="${esc(path)}">${esc(path)}</option>`)
+        .join("")
+    : "";
+
+  let inputs = "";
+  if (action === "find"){
+    inputs = `
+      <div class="field">
+        <label for="gateway-purpose">purpose（目的描述）</label>
+        <input class="input" id="gateway-purpose" value="${esc(App.gatewayPurpose)}" placeholder="例如：数据库设计、前端表单、代码评审">
+        <div class="help-text">匹配顺序：场景 name / description / tags 优先，技能 name / description 次级。</div>
+      </div>`;
+  } else if (action === "browse"){
+    inputs = `
+      <div class="field">
+        <label for="gateway-browse-scene">sceneId（省略时返回根节点）</label>
+        <select class="select" id="gateway-browse-scene">${sceneOptions}</select>
+        <div class="help-text">browse 只返回一个节点的元数据和直接挂载技能，不展开全文。</div>
+      </div>`;
+  } else {
+    inputs = `
+      <div class="field">
+        <label for="gateway-load-skill">skillName</label>
+        <select class="select" id="gateway-load-skill">${skillOptions}</select>
+      </div>
+      <div class="field">
+        <label for="gateway-load-path">scenePath（可选，用于记录本次使用来自哪个场景）</label>
+        <select class="select" id="gateway-load-path">${pathOptions || '<option value="">该技能未挂载到任何场景</option>'}</select>
+        <div class="help-text">load 返回整个技能文件夹的相对路径 → 内容 map，并写入一条 source=gateway 使用记录。</div>
+      </div>`;
+  }
+
+  return `
+    <div class="gateway-layout">
+      <div class="card">
+        <div class="card-head">
+          <h3>Agent 工具调用模拟</h3>
+          <span class="card-sub">skill_gateway</span>
+        </div>
+        <div class="field">
+          <label>action</label>
+          <div class="segmented">
+            <button class="${action === "find" ? "is-active" : ""}" data-action="gateway-action" data-value="find">find</button>
+            <button class="${action === "browse" ? "is-active" : ""}" data-action="gateway-action" data-value="browse">browse</button>
+            <button class="${action === "load" ? "is-active" : ""}" data-action="gateway-action" data-value="load">load</button>
+          </div>
+        </div>
+        ${inputs}
+        <div class="toolbar" style="margin:0">
+          <button class="btn btn-primary" data-action="run-gateway" ${enabled ? "" : "disabled"}>执行调用</button>
+          <button class="btn" data-action="run-demo-flow" ${enabled ? "" : "disabled"}>体验完整闭环</button>
+        </div>
+        <p class="help-text" style="margin-bottom:0">${enabled ? "调用会同步出现在左侧会话流，load 会点亮上方路由条。" : "网关已关闭：skill_gateway 工具已卸载，此处按钮不可用；harness 默认技能不受影响。"}</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h3>工具返回</h3>
+          <span class="card-sub">渐进式加载 / metadata first</span>
+        </div>
+        ${renderGatewayResult()}
+      </div>
+
+      <div class="card prompt-card ${enabled ? "" : "off"}">
+        <div class="card-head"><h3>系统提示词注入</h3></div>
+        <div class="prompt-line">
+          <span class="prompt-mark">ON/OFF</span>
+          <span>${enabled
+            ? "开始子任务前，先通过 skill_gateway 查询与目的匹配的技能，再决定是否 load 全文。"
+            : "skill_gateway 工具与提示词已卸载；默认技能加载保持原样，统计观察器仍继续记录。"}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderGatewayResult(){
+  const result = App.gatewayResult;
+  if (!result){
+    return `<div class="result-empty">还没有调用。选择 action 后执行，这里会显示结构化的工具返回。</div>`;
+  }
+
+  if (result.action === "load"){
+    if (!result.ok){
+      return `<div class="result-empty">${esc(result.error)}</div>`;
+    }
+    const files = Object.keys(result.files || {});
+    const preview = result.files && result.files["SKILL.md"] ? String(result.files["SKILL.md"]).slice(0, 320) : "";
+    return `
+      <div class="match-head">
+        <span class="path-pill">${esc(result.skillName)}</span>
+        <span class="match-note">${files.length} 个文件 / 相对路径 → 内容 map</span>
+      </div>
+      <div class="file-list">
+        ${files.map((path) => `<div class="file-row"><span>${esc(path)}</span><span>${typeof result.files[path] === "string" ? result.files[path].length + " chars" : "binary stub"}</span></div>`).join("")}
+      </div>
+      ${preview ? `<div class="file-preview">${esc(preview)}</div>` : ""}
+      <details class="raw-toggle">
+        <summary>查看原始 JSON</summary>
+        <pre class="json-pre">${esc(JSON.stringify({ action: "load", skillName: result.skillName, scenePath: result.scenePath || null, files }, null, 2))}</pre>
+      </details>`;
+  }
+
+  if (result.action === "browse"){
+    if (!result.ok) return `<div class="result-empty">${esc(result.error)}</div>`;
+    return `
+      <div class="match-head">
+        <span class="path-pill">${esc(result.path)}</span>
+        <span class="match-note">${result.children.length} 个子场景 / ${result.skills.length} 个直接技能</span>
+      </div>
+      ${result.description ? `<p class="help-text" style="margin:0 0 10px">${esc(result.description)}</p>` : ""}
+      <div class="section-label">直接挂载技能</div>
+      ${result.skills.length
+        ? `<div class="skill-result-list">${result.skills.map((skill) => `
+            <div class="skill-result">
+              <div class="skill-main">
+                <strong>${esc(skill.name)}</strong>
+                <p>${esc(skill.description)}</p>
+              </div>
+              <button class="btn btn-sm" data-action="gateway-action" data-value="load" data-skill="${esc(skill.name)}">load</button>
+            </div>`).join("")}</div>`
+        : `<div class="result-empty">该场景没有直接挂载技能。</div>`}
+      <details class="raw-toggle">
+        <summary>查看原始 JSON</summary>
+        <pre class="json-pre">${esc(JSON.stringify(result, null, 2))}</pre>
+      </details>`;
+  }
+
+  if (!result.ok) return `<div class="result-empty">${esc(result.message || result.error || "未知错误")}</div>`;
+  if (!result.skills.length) return `<div class="result-empty">${esc(result.message || "没有匹配结果。")}</div>`;
+
+  return `
+    <div class="match-head">
+      <span class="path-pill">${esc(result.matchedScenePath)}</span>
+      <span class="match-note">${result.matchType === "scene" ? "场景主匹配" : "技能次级匹配"} / ${result.skills.length} 个技能已去重</span>
+    </div>
+    <div class="skill-result-list">
+      ${result.groups.map((group) => `
+        <div class="section-label">${esc(group.path)}</div>
+        ${group.skills.map((skill) => `
+          <div class="skill-result">
+            <div class="skill-main">
+              <strong>${esc(skill.name)}</strong>
+              <p>${esc(skill.description)}</p>
+            </div>
+            <button class="btn btn-sm" data-action="gateway-load-from-result" data-skill="${esc(skill.name)}" data-path="${esc(group.path)}">load</button>
+          </div>`).join("")}
+      `).join("")}
+    </div>
+    <details class="raw-toggle">
+      <summary>查看原始 JSON</summary>
+      <pre class="json-pre">${esc(JSON.stringify({
+        action: "find",
+        purpose: result.purpose,
+        matchedScenePath: result.matchedScenePath,
+        matchType: result.matchType,
+        skills: result.skills,
+        groups: result.groups
+      }, null, 2))}</pre>
+    </details>`;
+}
+
+/* ---- 场景树管理 tab ---- */
+function renderCatalogTab(){
+  const selected = App.catalog.scenes[App.selectedSceneId] || App.catalog.scenes[App.catalog.rootSceneId];
+  const isRoot = selected.id === App.catalog.rootSceneId;
+  const attachOptions = Object.keys(App.catalog.skills)
+    .filter((name) => !(selected.skills || []).includes(name))
+    .map((name) => `<option value="${esc(name)}">${esc(name)}</option>`)
+    .join("");
+
+  return `
+    ${renderUploadReport()}
+    <div class="toolbar">
+      <button class="btn btn-primary" data-action="add-scene">+ 新建子场景</button>
+      <button class="btn" data-action="upload-folder">上传文件夹</button>
+      <button class="btn" data-action="upload-zip">上传 zip</button>
+      <button class="btn" data-action="import-sample">导入示例技能</button>
+    </div>
+    <div class="catalog-layout">
+      <section class="card tree-card">
+        <div class="card-head">
+          <h3>场景树</h3>
+          <span class="card-sub">${Object.keys(App.catalog.scenes).length} scenes</span>
+        </div>
+        <div class="tree" id="scene-tree">
+          ${renderTree(App.catalog.rootSceneId)}
+        </div>
+      </section>
+
+      <div>
+        <section class="card scene-editor">
+          <div class="card-head">
+            <h3>场景详情</h3>
+            <span class="card-sub mono">${esc(selected.id)}</span>
+          </div>
+          <div class="scene-meta">
+            <span class="path-pill">${esc(Core.scenePath(App.catalog, selected.id))}</span>
+          </div>
+          <div class="field">
+            <label for="scene-name">name</label>
+            <input class="input" id="scene-name" value="${esc(App.sceneDraft.name)}" ${isRoot ? "disabled" : ""}>
+          </div>
+          <div class="field">
+            <label for="scene-desc">description</label>
+            <textarea class="textarea" id="scene-desc" ${isRoot ? "disabled" : ""}>${esc(App.sceneDraft.description)}</textarea>
+          </div>
+          <div class="field">
+            <label for="scene-tags">tags（逗号分隔）</label>
+            <input class="input" id="scene-tags" value="${esc(App.sceneDraft.tags)}" ${isRoot ? "disabled" : ""} placeholder="backend, database">
+          </div>
+          <button class="btn btn-primary" data-action="save-scene" ${isRoot ? "disabled" : ""}>保存场景</button>
+
+          <div class="section-label">直接挂载的技能</div>
+          <div class="chip-row">
+            ${(selected.skills || []).length
+              ? selected.skills.map((name) => `<span class="chip">${esc(name)}<button data-action="detach-skill" data-skill="${esc(name)}" aria-label="解链 ${esc(name)}">×</button></span>`).join("")
+              : `<span class="empty">该场景还没有直接挂载技能。</span>`}
+          </div>
+          <div class="attach-row" style="margin-top:8px">
+            <select class="select" id="attach-skill-select">
+              ${attachOptions ? `<option value="">选择技能挂载</option>${attachOptions}` : `<option value="">目录中暂无可挂载技能</option>`}
+            </select>
+            <button class="btn" data-action="attach-skill">挂载</button>
+          </div>
+
+          <div class="section-label">子场景</div>
+          <div class="child-scene-list">
+            ${(selected.children || []).length
+              ? selected.children.map((childId) => {
+                  const child = App.catalog.scenes[childId];
+                  if (!child) return "";
+                  return `<div class="child-scene-row">
+                    <span>${esc(child.name)}</span>
+                    <span class="mono" style="font-size:9px;color:var(--muted)">${child.skills.length} 技能 / ${child.children.length} 子场景</span>
+                    <button class="btn btn-sm" data-action="select-scene" data-id="${esc(child.id)}">查看</button>
+                  </div>`;
+                }).join("")
+              : `<div class="empty">暂无子场景，使用顶部「新建子场景」添加。</div>`}
+          </div>
+
+          <div class="danger-zone">
+            <p>删除场景会级联删除其所有子场景；直接挂载的技能只会解链，技能文件与历史统计保留。</p>
+            <button class="btn btn-danger" data-action="delete-scene" ${isRoot ? "disabled" : ""}>删除该场景</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h3>数据落点</h3>
+            <span class="card-sub">ADR-0001 / 仓库文件持久化</span>
+          </div>
+          <div class="file-list">
+            <div class="file-row"><span>.skillgate/</span><span>默认工作目录根</span></div>
+          </div>
+          <p class="help-text">catalog / usage / config 落成仓库内文件；锚点文件可改址，换址时迁移统计。本原型只存内存，不写文件。</p>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h3>技能目录</h3>
+            <span class="card-sub">${Object.keys(App.catalog.skills).length} skills / 一个文件夹 = 一个技能</span>
+          </div>
+          <div class="skill-catalog-list">
+            ${renderSkillCatalog()}
+          </div>
+        </section>
+      </div>
+    </div>`;
+}
+
+function renderTree(sceneId, depth = 0){
+  const scene = App.catalog.scenes[sceneId];
+  if (!scene) return "";
+  const collapsed = App.collapsed.has(sceneId);
+  const selected = App.selectedSceneId === sceneId;
+  const indent = `<span class="depth-indent" style="width:${depth * 14}px"></span>`;
+  const twisty = (scene.children || []).length
+    ? `<button class="twisty" data-action="toggle-collapse" data-id="${esc(sceneId)}" aria-label="${collapsed ? "展开" : "折叠"} ${esc(scene.name)}">${collapsed ? "▸" : "▾"}</button>`
+    : `<span class="twisty"></span>`;
+  const row = `
+    <div class="tree-row ${selected ? "is-selected" : ""}" data-action="select-scene" data-id="${esc(sceneId)}">
+      ${indent}
+      ${twisty}
+      <button class="tree-name">${esc(scene.name)}</button>
+      <span class="tree-meta">${scene.skills.length} 技能 / ${scene.children.length} 子场景</span>
+      <span class="tree-actions">
+        <button class="btn btn-sm" data-action="add-scene" data-parent="${esc(sceneId)}">+ 子</button>
+        ${sceneId !== App.catalog.rootSceneId ? `<button class="btn btn-sm btn-danger" data-action="delete-scene" data-id="${esc(sceneId)}">删</button>` : ""}
+      </span>
+    </div>`;
+  let children = "";
+  if (!collapsed){
+    children = (scene.children || []).map((childId) => renderTree(childId, depth + 1)).join("");
+  }
+  return row + children;
+}
+
+function renderSkillCatalog(){
+  const names = Object.keys(App.catalog.skills);
+  if (!names.length){
+    return `<div class="tree-empty">技能目录为空。上传技能文件夹或 zip，或点击「导入示例技能」。</div>`;
+  }
+  return names.map((name) => {
+    const skill = App.catalog.skills[name];
+    const paths = Core.skillPaths(App.catalog, name);
+    const fileCount = App.skillFiles[name] ? Object.keys(App.skillFiles[name]).length : 0;
+    return `
+      <div class="skill-catalog-row">
+        <div class="skill-main">
+          <div class="skill-title">
+            <strong>${esc(skill.name)}</strong>
+            <span class="file-count">${fileCount} files / updated ${fmtDateTime(skill.updatedAt)}</span>
+          </div>
+          <p>${esc(skill.description)}</p>
+          <div class="skill-paths">挂载：${paths.length ? paths.map((p) => esc(p)).join("  |  ") : "未挂载到任何场景"}</div>
+        </div>
+        <div style="display:grid;gap:6px;align-content:center">
+          <button class="btn btn-sm" data-action="delete-skill" data-skill="${esc(name)}">删除</button>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+function renderUploadReport(){
+  if (!App.uploadReport.length) return "";
+  return App.uploadReport.map((item) => `
+    <div class="upload-report ${item.ok ? "ok" : ""}">
+      <strong>${esc(item.name)}</strong>：${item.ok ? "已导入 / " + esc(item.detail) : "校验失败"}
+      ${item.reasons && item.reasons.length ? `<ul>${item.reasons.map((reason) => `<li class="reason">${esc(reason)}</li>`).join("")}</ul>` : ""}
+    </div>`).join("");
+}
+
+/* ---- 统计 tab ---- */
+function renderStatsTab(){
+  const aggregate = Core.aggregateUsage(App.usage, App.sourceFilter);
+  const total = aggregate.total;
+  const maxSkillCount = aggregate.skills.length ? aggregate.skills[0].count : 1;
+  const maxSceneCount = aggregate.scenes.length ? aggregate.scenes[0].count : 1;
+
+  const timeline = [...App.usage]
+    .filter((record) => App.sourceFilter === "all" || record.source === App.sourceFilter)
+    .sort((a, b) => b.timestamp - a.timestamp);
+
+  return `
+    <div class="stats-toolbar">
+      <span class="mono" style="font-size:11px;color:var(--muted)">来源</span>
+      <div class="filter-chips">
+        <button class="${App.sourceFilter === "all" ? "is-active" : ""}" data-action="filter-source" data-value="all">全部</button>
+        <button class="${App.sourceFilter === "gateway" ? "is-active" : ""}" data-action="filter-source" data-value="gateway">gateway</button>
+        <button class="${App.sourceFilter === "agent-skills" ? "is-active" : ""}" data-action="filter-source" data-value="agent-skills">agent-skills</button>
+      </div>
+      <span class="head-gap" style="flex:1"></span>
+      <button class="btn btn-sm" data-action="simulate-gateway-load">模拟网关 load</button>
+      <button class="btn btn-sm" data-action="simulate-agent-skill">模拟默认 skill 调用</button>
+    </div>
+
+    <div class="stats-grid">
+      <section class="card timeline-card">
+        <div class="card-head">
+          <h3>会话内时间线</h3>
+          <span class="card-sub">session ${esc(App.sessionId)} / ${timeline.length} records</span>
+        </div>
+        ${timeline.length
+          ? `<div class="timeline-list">${timeline.map((record) => `
+              <div class="timeline-item">
+                <span class="timeline-time">${fmtTime(record.timestamp)}</span>
+                <div class="timeline-main">
+                  <strong>${esc(record.skillName)}</strong>
+                  <span class="source-badge ${record.source === "gateway" ? "source-gateway" : "source-agent"}">${esc(record.source)}</span>
+                  <div class="timeline-path">${record.scenePath ? esc(record.scenePath) : "无场景路径（默认技能来源）"}</div>
+                </div>
+              </div>`).join("")}
+            </div>`
+          : `<div class="result-empty">该来源筛选下暂无使用记录。点右侧按钮模拟一次调用。</div>`}
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h3>全局统计 / 按技能</h3>
+          <span class="card-sub">${total} 次使用</span>
+        </div>
+        ${aggregate.skills.length
+          ? `<div class="table-scroll"><table class="stat-table">
+              <thead><tr><th>技能</th><th>次数</th><th>占比</th><th>最近使用</th></tr></thead>
+              <tbody>${aggregate.skills.map((skill) => `
+                <tr>
+                  <td>
+                    <div class="stat-name">${esc(skill.skillName)}</div>
+                    <div class="inline-bar" style="width:${Math.max(8, Math.round(skill.count / maxSkillCount * 92))}px"></div>
+                  </td>
+                  <td class="stat-num">${skill.count}</td>
+                  <td class="stat-share">${total ? (skill.count / total * 100).toFixed(1) : "0.0"}%</td>
+                  <td class="stat-share">${fmtDateTime(skill.lastUsed)}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table></div>`
+          : `<div class="result-empty">暂无聚合数据。</div>`}
+        <div class="table-note">统计只看 source 筛选结果；历史记录在技能删除后仍保留。</div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h3>全局统计 / 按场景</h3>
+          <span class="card-sub">scenePath 聚合</span>
+        </div>
+        ${aggregate.scenes.length
+          ? `<div class="table-scroll"><table class="stat-table">
+              <thead><tr><th>场景路径</th><th>次数</th><th>占比</th></tr></thead>
+              <tbody>${aggregate.scenes.map((scene) => `
+                <tr>
+                  <td class="stat-name" style="white-space:normal;line-height:1.4">${esc(scene.scenePath)}</td>
+                  <td class="stat-num">${scene.count}</td>
+                  <td class="stat-share">${total ? (scene.count / total * 100).toFixed(1) : "0.0"}%</td>
+                </tr>`).join("")}
+              </tbody>
+            </table></div>`
+          : `<div class="result-empty">暂无带场景路径的使用记录。gateway load 时传入 scenePath 后才会出现。</div>`}
+        <div class="table-note">agent-skills 来源通常没有 scenePath，因此只出现在按技能统计中。</div>
+      </section>
+    </div>`;
+}
+
+/* ============================================================
+ * 6. 行为
+ * ============================================================ */
+function appendTranscript(event){
+  App.transcript.push({ id: Core.makeId("evt"), time: Date.now(), ...event });
+  if (App.transcript.length > 40) App.transcript.shift();
+}
+
+function addUploadReport(item){
+  App.uploadReport.unshift(item);
+  if (App.uploadReport.length > 5) App.uploadReport.pop();
+}
+
+function triggerRoutePulse(){
+  App.routePulse = true;
+  renderRouteStrip();
+  setTimeout(() => {
+    App.routePulse = false;
+    renderRouteStrip();
+  }, 900);
+}
+
+async function handleAction(action, button, event){
+  if (action === "open-panel"){
+    App.panelOpen = true;
+    App.lastEvent = "打开插件面板";
+    render();
+    return;
+  }
+  if (action === "close-panel"){
+    App.panelOpen = false;
+    App.lastEvent = "关闭插件面板";
+    render();
+    return;
+  }
+  if (action === "switch-tab"){
+    App.activeTab = button.dataset.tab;
+    App.lastEvent = "切换 tab：" + App.activeTab;
+    render();
+    return;
+  }
+  if (action === "toggle-gateway"){
+    App.config.enabled = !App.config.enabled;
+    App.lastEvent = App.config.enabled ? "网关已开启：注入工具与提示词" : "网关已关闭：卸载工具与提示词，默认技能加载不变，观察器继续运行";
+    render();
+    toast(App.lastEvent);
+    return;
+  }
+  if (action === "gateway-action"){
+    App.gatewayAction = button.dataset.value;
+    if (button.dataset.skill) App.gatewayLoadSkill = button.dataset.skill;
+    if (App.gatewayAction === "load" && !App.catalog.skills[App.gatewayLoadSkill]){
+      App.gatewayLoadSkill = Object.keys(App.catalog.skills)[0] || "";
+    }
+    App.lastEvent = "选择 action：" + App.gatewayAction;
+    render();
+    return;
+  }
+  if (action === "run-gateway"){
+    await runGatewayCall();
+    return;
+  }
+  if (action === "run-demo-flow"){
+    await runDemoFlow();
+    return;
+  }
+  if (action === "gateway-load-from-result"){
+    const skill = button.dataset.skill;
+    const path = button.dataset.path || "";
+    App.gatewayAction = "load";
+    App.gatewayLoadSkill = skill;
+    App.gatewayLoadPath = path;
+    await runGatewayCall(path);
+    return;
+  }
+  if (action === "select-scene"){
+    App.selectedSceneId = button.dataset.id;
+    syncSceneDraft();
+    App.lastEvent = "选中场景：" + App.selectedSceneId;
+    render();
+    return;
+  }
+  if (action === "toggle-collapse"){
+    const id = button.dataset.id;
+    if (App.collapsed.has(id)) App.collapsed.delete(id);
+    else App.collapsed.add(id);
+    App.lastEvent = App.collapsed.has(id) ? "折叠场景：" + id : "展开场景：" + id;
+    render();
+    return;
+  }
+  if (action === "add-scene"){
+    const parentId = button.dataset.parent || App.selectedSceneId;
+    const result = Core.createScene(App.catalog, parentId, {
+      name: "新场景",
+      description: "描述这个场景对应的工作目的。",
+      tags: ""
+    });
+    if (!result.ok){
+      toast(result.error, "error");
+      return;
+    }
+    App.catalog = result.catalog;
+    App.selectedSceneId = result.sceneId;
+    App.collapsed.delete(parentId);
+    syncSceneDraft();
+    App.lastEvent = "新建子场景：" + result.sceneId;
+    render();
+    return;
+  }
+  if (action === "save-scene"){
+    const name = $("#scene-name") ? $("#scene-name").value : App.sceneDraft.name;
+    const description = $("#scene-desc") ? $("#scene-desc").value : App.sceneDraft.description;
+    const tags = $("#scene-tags") ? $("#scene-tags").value : App.sceneDraft.tags;
+    const result = Core.updateScene(App.catalog, App.selectedSceneId, { name, description, tags });
+    if (!result.ok){
+      toast(result.error, "error");
+      return;
+    }
+    App.catalog = result.catalog;
+    syncSceneDraft();
+    App.lastEvent = "保存场景：" + App.selectedSceneId;
+    render();
+    toast("场景已保存。");
+    return;
+  }
+  if (action === "delete-scene"){
+    const sceneId = button.dataset.id || App.selectedSceneId;
+    const scene = App.catalog.scenes[sceneId];
+    if (!scene) return;
+    const ok = await confirmDialog({
+      title: "删除场景「" + scene.name + "」",
+      text: "该场景及其全部子场景会被删除。直接挂载的技能只会解链，技能文件与历史使用统计保留。",
+      confirmLabel: "删除场景",
+      danger: true
+    });
+    if (!ok) return;
+    const result = Core.deleteScene(App.catalog, sceneId);
+    if (!result.ok){
+      toast(result.error, "error");
+      return;
+    }
+    App.catalog = result.catalog;
+    App.selectedSceneId = App.catalog.rootSceneId;
+    syncSceneDraft();
+    App.lastEvent = "删除场景：" + sceneId + "（级联删除子场景，技能只解链）";
+    render();
+    toast(App.lastEvent);
+    return;
+  }
+  if (action === "attach-skill"){
+    const select = $("#attach-skill-select");
+    const skillName = select ? select.value : "";
+    if (!skillName){
+      toast("请先选择技能。", "error");
+      return;
+    }
+    const result = Core.attachSkill(App.catalog, App.selectedSceneId, skillName);
+    if (!result.ok){
+      toast(result.error, "error");
+      return;
+    }
+    App.catalog = result.catalog;
+    App.lastEvent = "挂载技能 " + skillName + " → " + App.selectedSceneId;
+    render();
+    return;
+  }
+  if (action === "detach-skill"){
+    const skillName = button.dataset.skill;
+    const result = Core.detachSkill(App.catalog, App.selectedSceneId, skillName);
+    if (!result.ok){
+      toast(result.error, "error");
+      return;
+    }
+    App.catalog = result.catalog;
+    App.lastEvent = "解链技能：" + skillName;
+    render();
+    return;
+  }
+  if (action === "delete-skill"){
+    const skillName = button.dataset.skill;
+    const skill = App.catalog.skills[skillName];
+    if (!skill) return;
+    const paths = Core.skillPaths(App.catalog, skillName);
+    const ok = await confirmDialog({
+      title: "删除技能「" + skillName + "」",
+      text: "技能会从所有场景解链并移除文件；历史使用统计会保留。\n当前挂载：" + (paths.length ? paths.join(", ") : "无"),
+      confirmLabel: "删除技能",
+      danger: true
+    });
+    if (!ok) return;
+    const result = Core.deleteSkill(App.catalog, skillName);
+    if (!result.ok){
+      toast(result.error, "error");
+      return;
+    }
+    App.catalog = result.catalog;
+    delete App.skillFiles[skillName];
+    App.lastEvent = "删除技能：" + skillName + "（全场景解链 + 移除文件 + 保留统计）";
+    render();
+    toast(App.lastEvent);
+    return;
+  }
+  if (action === "upload-folder"){
+    $("#folder-input").value = "";
+    $("#folder-input").click();
+    return;
+  }
+  if (action === "upload-zip"){
+    $("#zip-input").value = "";
+    $("#zip-input").click();
+    return;
+  }
+  if (action === "import-sample"){
+    await importSampleSkills();
+    return;
+  }
+  if (action === "filter-source"){
+    App.sourceFilter = button.dataset.value;
+    App.lastEvent = "统计来源筛选：" + App.sourceFilter;
+    render();
+    return;
+  }
+  if (action === "simulate-gateway-load"){
+    const name = Object.keys(App.catalog.skills)[0];
+    if (!name){
+      toast("技能目录为空，无法模拟。", "error");
+      return;
+    }
+    const path = Core.skillPaths(App.catalog, name)[0] || null;
+    App.usage = Core.recordUsage(App.usage, {
+      skillName: name,
+      source: "gateway",
+      scenePath: path,
+      sessionId: App.sessionId
+    });
+    appendTranscript({ role: "usage", source: "gateway", skillName: name, scenePath: path });
+    App.lastEvent = "observer 记录 gateway 使用：" + name;
+    render();
+    triggerRoutePulse();
+    return;
+  }
+  if (action === "simulate-agent-skill"){
+    const name = Object.keys(App.catalog.skills).find((candidate) => candidate !== "tdd") || Object.keys(App.catalog.skills)[0];
+    if (!name){
+      toast("技能目录为空，无法模拟。", "error");
+      return;
+    }
+    App.usage = Core.recordUsage(App.usage, {
+      skillName: name,
+      source: "agent-skills",
+      scenePath: null,
+      sessionId: App.sessionId
+    });
+    appendTranscript({ role: "usage", source: "agent-skills", skillName: name, scenePath: null });
+    App.lastEvent = "observer 记录 agent-skills 使用：" + name;
+    render();
+    return;
+  }
+  if (action === "reset-demo"){
+    App.catalog = seedCatalog();
+    App.usage = seedUsage();
+    App.transcript = seedTranscript();
+    App.config = { enabled: true };
+    App.selectedSceneId = "database";
+    App.collapsed = new Set();
+    App.gatewayAction = "find";
+    App.gatewayPurpose = "数据库设计";
+    App.gatewayBrowseSceneId = "root";
+    App.gatewayLoadSkill = "db-schema-design";
+    App.gatewayResult = null;
+    App.sourceFilter = "all";
+    App.uploadReport = [];
+    App.lastEvent = "演示数据已重置";
+    syncSceneDraft();
+    render();
+    toast("演示数据已重置。");
+    return;
+  }
+  if (action === "toggle-state-drawer"){
+    App.stateDrawerOpen = !App.stateDrawerOpen;
+    App.lastEvent = App.stateDrawerOpen ? "打开内存状态抽屉" : "关闭内存状态抽屉";
+    render();
+    return;
+  }
+}
+
+async function runGatewayCall(forcedPath){
+  if (!App.config.enabled){
+    toast("网关已关闭，skill_gateway 工具不可用。", "error");
+    return;
+  }
+
+  if (App.gatewayAction === "find"){
+    const purposeInput = $("#gateway-purpose");
+    const purpose = (purposeInput ? purposeInput.value : App.gatewayPurpose).trim();
+    App.gatewayPurpose = purpose;
+    if (!purpose){
+      toast("请输入 purpose。", "error");
+      return;
+    }
+    const result = Core.find(App.catalog, purpose);
+    App.gatewayResult = { action: "find", ...result };
+    const summary = result.matchedScenePath
+      ? "命中「" + result.matchedScenePath + "」，返回 " + result.skills.length + " 个技能元数据"
+      : (result.message || "无匹配");
+    appendTranscript({ role: "tool", tool: "skill_gateway", action: "find", input: purpose, summary });
+    App.lastEvent = "find(" + purpose + ")：" + summary;
+    if (result.skills.length){
+      App.gatewayLoadSkill = result.skills[0].name;
+    }
+    render();
+    return;
+  }
+
+  if (App.gatewayAction === "browse"){
+    const sceneId = $("#gateway-browse-scene") ? $("#gateway-browse-scene").value : App.gatewayBrowseSceneId;
+    App.gatewayBrowseSceneId = sceneId;
+    const result = Core.browse(App.catalog, sceneId);
+    App.gatewayResult = { action: "browse", ...result };
+    const summary = result.ok
+      ? "浏览「" + result.path + "」：" + result.children.length + " 个子场景， " + result.skills.length + " 个直接技能"
+      : result.error;
+    appendTranscript({ role: "tool", tool: "skill_gateway", action: "browse", input: sceneId || "root", summary });
+    App.lastEvent = "browse(" + (sceneId || "root") + ")：" + summary;
+    render();
+    return;
+  }
+
+  if (App.gatewayAction === "load"){
+    const skillName = $("#gateway-load-skill") ? $("#gateway-load-skill").value : App.gatewayLoadSkill;
+    const pathSelect = $("#gateway-load-path");
+    const scenePath = forcedPath !== undefined ? forcedPath : (pathSelect ? pathSelect.value : "");
+    App.gatewayLoadSkill = skillName;
+    const result = Core.loadSkillFiles(App.skillFiles, skillName);
+    if (!result.ok){
+      App.gatewayResult = { action: "load", ...result };
+      App.lastEvent = "load 失败：" + result.error;
+      render();
+      toast(result.error, "error");
+      return;
+    }
+    App.usage = Core.recordUsage(App.usage, {
+      skillName,
+      source: "gateway",
+      scenePath: scenePath || null,
+      sessionId: App.sessionId
+    });
+    App.gatewayResult = { action: "load", ...result, scenePath: scenePath || null };
+    const fileNames = Object.keys(result.files);
+    const summary = "返回 " + fileNames.length + " 个文件：" + fileNames.join(", ");
+    appendTranscript({ role: "tool", tool: "skill_gateway", action: "load", input: skillName, scenePath: scenePath || null, summary });
+    appendTranscript({ role: "usage", source: "gateway", skillName, scenePath: scenePath || null });
+    appendTranscript({ role: "assistant", text: "已加载 " + skillName + " 的完整内容，开始按技能执行。" });
+    App.lastEvent = "load(" + skillName + ")：" + summary + " / 已记录 gateway 使用";
+    render();
+    triggerRoutePulse();
+    return;
+  }
+}
+
+async function runDemoFlow(){
+  if (!App.config.enabled){
+    toast("网关已关闭，无法运行演示闭环。", "error");
+    return;
+  }
+  App.gatewayAction = "find";
+  App.gatewayPurpose = "数据库设计";
+  const found = Core.find(App.catalog, "数据库设计");
+  App.gatewayResult = { action: "find", ...found };
+  appendTranscript({ role: "tool", tool: "skill_gateway", action: "find", input: "数据库设计", summary: "命中「" + found.matchedScenePath + "」，返回 " + found.skills.length + " 个技能元数据" });
+  if (!found.skills.length){
+    render();
+    return;
+  }
+  const skillName = found.skills[0].name;
+  const scenePath = found.matchedScenePath;
+  App.gatewayAction = "load";
+  App.gatewayLoadSkill = skillName;
+  const loaded = Core.loadSkillFiles(App.skillFiles, skillName);
+  if (loaded.ok){
+    App.usage = Core.recordUsage(App.usage, { skillName, source: "gateway", scenePath, sessionId: App.sessionId });
+    App.gatewayResult = { action: "load", ...loaded, scenePath };
+    appendTranscript({ role: "tool", tool: "skill_gateway", action: "load", input: skillName, scenePath, summary: "返回 " + Object.keys(loaded.files).length + " 个文件" });
+    appendTranscript({ role: "usage", source: "gateway", skillName, scenePath });
+    appendTranscript({ role: "assistant", text: "渐进式取用完成：先 find 发现元数据，再 load 全文。" });
+  }
+  App.lastEvent = "完整闭环：find 发现 → load 全文 → 记录 gateway 使用";
+  render();
+  triggerRoutePulse();
+}
+
+/* ---- 上传 ---- */
+const TEXT_EXT = /\.(md|markdown|txt|json|ya?ml|toml|css|html?|jsx?|tsx?|sql|py|sh|xml|svg|csv)$/i;
+
+async function filesFromFolder(fileList){
+  const groups = new Map();
+  for (const file of fileList){
+    let path = (file.webkitRelativePath || file.name || "").replace(/\\/g, "/");
+    const parts = path.split("/").filter(Boolean);
+    let groupName;
+    let rel;
+    if (parts.length <= 1){
+      groupName = file.name;
+      rel = file.name;
+    } else {
+      groupName = parts[0];
+      rel = parts.slice(1).join("/");
+    }
+    if (!groups.has(groupName)) groups.set(groupName, []);
+    const content = TEXT_EXT.test(rel)
+      ? await file.text()
+      : { binary: true, size: file.size, type: file.type || "application/octet-stream" };
+    groups.get(groupName).push({ path: rel, content });
+  }
+  return [...groups.entries()].map(([name, files]) => ({ name, files }));
+}
+
+async function filesFromZip(file){
+  const buffer = new Uint8Array(await file.arrayBuffer());
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  let eocd = -1;
+  const scanStart = Math.max(0, buffer.length - 65557);
+  for (let i = buffer.length - 22; i >= scanStart; i -= 1){
+    if (view.getUint32(i, true) === 0x06054b50){
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error("不是有效的 zip 文件。");
+  const entryCount = view.getUint16(eocd + 10, true);
+  const centralOffset = view.getUint32(eocd + 16, true);
+  if (centralOffset + 46 > buffer.length) throw new Error("zip 目录损坏。");
+
+  const decoder = new TextDecoder("utf-8");
+  const entries = [];
+  let cursor = centralOffset;
+  for (let i = 0; i < entryCount; i += 1){
+    if (view.getUint32(cursor, true) !== 0x02014b50) throw new Error("zip 目录项损坏。");
+    const method = view.getUint16(cursor + 10, true);
+    const compSize = view.getUint32(cursor + 20, true);
+    const nameLen = view.getUint16(cursor + 28, true);
+    const extraLen = view.getUint16(cursor + 30, true);
+    const commentLen = view.getUint16(cursor + 32, true);
+    const localOffset = view.getUint32(cursor + 42, true);
+    const rawName = buffer.subarray(cursor + 46, cursor + 46 + nameLen);
+    const name = decoder.decode(rawName).replace(/\\/g, "/");
+    cursor += 46 + nameLen + extraLen + commentLen;
+    if (name.endsWith("/") || !name) continue;
+    if (name.startsWith("__MACOSX/") || name.endsWith("/.DS_Store") || /(^|\/)\._/.test(name)) continue;
+
+    const localNameLen = view.getUint16(localOffset + 26, true);
+    const localExtraLen = view.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + localNameLen + localExtraLen;
+    if (dataStart + compSize > buffer.length) throw new Error("zip 数据项越界。");
+
+    let bytes = buffer.slice(dataStart, dataStart + compSize);
+    if (method === 8){
+      if (typeof DecompressionStream === "undefined"){
+        throw new Error("当前浏览器不支持 zip deflate 解压，请改用文件夹上传。");
+      }
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    } else if (method !== 0){
+      throw new Error("不支持的 zip 压缩方式：" + method);
+    }
+    const content = TEXT_EXT.test(name)
+      ? decoder.decode(bytes)
+      : { binary: true, size: bytes.length, type: "" };
+    entries.push({ path: name, content });
+  }
+  return entries;
+}
+
+async function importUploads(items){
+  for (const item of items){
+    const validation = Core.validateUpload(item);
+    if (!validation.ok){
+      addUploadReport({ name: item.name || "未知上传项", ok: false, reasons: validation.reasons });
+      App.lastEvent = "上传校验失败：" + (item.name || "未知上传项");
+      render();
+      toast("上传校验失败：" + (item.name || "未知上传项"), "error");
+      continue;
+    }
+
+    const skill = validation.skill;
+    const exists = Boolean(App.catalog.skills[skill.name]);
+    if (exists){
+      const ok = await confirmDialog({
+        title: "同名技能已存在：" + skill.name,
+        text: "上传将原地更新该技能的内容与描述，保留 name 键和全部历史使用统计。",
+        confirmLabel: "更新技能",
+        danger: false
+      });
+      if (!ok){
+        addUploadReport({ name: item.name, ok: false, reasons: ["用户取消了同名更新。"] });
+        continue;
+      }
+    }
+
+    const result = Core.upsertSkill(App.catalog, skill.name, skill.description);
+    App.catalog = result.catalog;
+    App.skillFiles[skill.name] = skill.files;
+    addUploadReport({
+      name: item.name,
+      ok: true,
+      detail: exists
+        ? "同名更新 " + skill.name + "，历史统计保留"
+        : "新增 " + skill.name + "，" + Object.keys(skill.files).length + " 个文件，未自动挂载"
+    });
+    App.lastEvent = (exists ? "同名更新" : "导入") + "技能：" + skill.name;
+    render();
+    toast(App.lastEvent);
+  }
+}
+
+async function importSampleSkills(){
+  const sample = {
+    name: "sample-incident-review",
+    files: [
+      { path: "SKILL.md", content: `---
+name: sample-incident-review
+description: 复盘线上故障的时间线、决策点与改进项，产出可执行的后续行动。
+---
+
+# Incident Review
+
+先还原时间线，再找决策点，最后只保留可执行的改进项。
+` },
+      { path: "checklist.md", content: "1. 影响范围\n2. 恢复动作\n3. 根因\n4. 改进项\n" }
+    ]
+  };
+  await importUploads([sample]);
+}
+
+/* ---- 输入事件（不触发整页重绘，保护焦点） ---- */
+document.addEventListener("input", (event) => {
+  const target = event.target;
+  if (target.id === "gateway-purpose"){
+    App.gatewayPurpose = target.value;
+  } else if (target.id === "scene-name"){
+    App.sceneDraft.name = target.value;
+  } else if (target.id === "scene-desc"){
+    App.sceneDraft.description = target.value;
+  } else if (target.id === "scene-tags"){
+    App.sceneDraft.tags = target.value;
+  }
+});
+
+document.addEventListener("change", async (event) => {
+  const target = event.target;
+  if (target.id === "gateway-browse-scene"){
+    App.gatewayBrowseSceneId = target.value;
+    render();
+  } else if (target.id === "gateway-load-skill"){
+    App.gatewayLoadSkill = target.value;
+    render();
+  } else if (target.id === "gateway-load-path"){
+    // 只记在调用时读取
+  } else if (target.id === "folder-input" && target.files && target.files.length){
+    try{
+      const items = await filesFromFolder(target.files);
+      await importUploads(items);
+    } catch (error){
+      toast("文件夹读取失败：" + error.message, "error");
+    }
+  } else if (target.id === "zip-input" && target.files && target.files.length){
+    for (const file of target.files){
+      try{
+        const entries = await filesFromZip(file);
+        await importUploads([{ name: file.name, files: entries }]);
+      } catch (error){
+        addUploadReport({ name: file.name, ok: false, reasons: [error.message] });
+        App.lastEvent = "zip 读取失败：" + file.name;
+        render();
+        toast("zip 读取失败：" + error.message, "error");
+      }
+    }
+  }
+});
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-action]");
+  if (!button) return;
+  await handleAction(button.dataset.action, button, event);
+});
+
+/* ============================================================
+ * 7. 启动
+ * ============================================================ */
+render();
+</script>
+</body>
+</html>
