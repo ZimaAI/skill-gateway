@@ -28,16 +28,21 @@ export const Config = z.object({
 });
 
 const GATEWAY_HINT = [
-  '## Skill gateway',
-  '在任何设计、执行开始前，先通过 skill_gateway 逐层深入，探索合适的 skill 加载至上下文中。',
-  '按以下步骤通过 skill_gateway 沿场景树逐层深入，不要跳过场景或凭空猜测场景 id：',
-  '1. 调用 skill_gateway(action: "browse")，工具会返回根场景及其直接子场景和直接挂载的技能元数据。',
-  '2. 选择符合行动目的的场景，调用 skill_gateway(action: "browse", sceneId: "<场景 id>") 进入该场景',
-  '3. 重复第 2 步逐层深入，每次返回的都只是当前场景的直接子场景和直接技能，直到进入到含有合适的 skill 的场景。',
-  '4. 调用 skill_gateway(action: "load", skillName: "<技能 name>", scenePath: "<当前场景路径>") 一次性加载该技能全文并应用。',
-  '注意：',
-  '1. 如果有多个你认为合适的场景，可以进入不同的场景，加载任意多项合适的技能。',
-  '2. 如果没有符合的场景和 skill，则不需要加载技能，直接开始下一步任务。'
+  '## Skill gateway（强制前置闸门，不可跳过）',
+  '每次收到用户请求后，在输出任何最终回答、方案、代码或开始执行任务之前，必须先通过 skill_gateway 探索可用技能。',
+  '无论任务看起来多么简单、是否已有相关知识、或用户是否要求直接开始，都必须先执行本流程。',
+  '流程：',
+  '1. 必须首先调用 skill_gateway(action: "browse")，获取根场景、直接子场景和直接挂载的技能元数据。',
+  '2. 只依据返回结果，选择与当前目标最相关的场景，调用 skill_gateway(action: "browse", sceneId: "<返回的真实 sceneId>") 进入。',
+  '3. 逐层重复第 2 步，直到进入包含合适 skill 的场景。禁止跳层、禁止猜测 sceneId。',
+  '4. 调用 skill_gateway(action: "load", skillName: "<返回的真实 skill name>", scenePath: "<当前场景路径>") 加载该技能全文并应用。',
+  '强制规则：',
+  '1. 禁止在至少一次 skill_gateway(action: "browse") 之前输出最终答案或开始执行任务。',
+  '2. 如果当前场景没有直接技能，但存在与目标相关的子场景，必须继续进入，不能提前跳过。',
+  '3. 可以进入不同场景并加载多个相关技能。',
+  '4. 只有在完成 browse 且确认根场景及子场景中确实没有任何相关场景或技能时，才可跳过加载，并需简短说明“未找到相关技能”。',
+  '5. 所有 sceneId、skillName、scenePath 必须来自工具返回，禁止凭空构造。',
+  '6. 如果工具调用失败，重试一次；仍失败则说明“skill_gateway 不可用”。'
 ].join('\n');
 
 function firstString(value) {
