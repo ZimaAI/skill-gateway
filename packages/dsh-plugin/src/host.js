@@ -15,6 +15,7 @@ import path from 'node:path';
 import z from '@deepseek-ai/schemastery';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { SkillGatewayService } from './gateway-service.js';
+import { buildGatewayToolResponse } from './tool-response.js';
 import { unzip } from './zip.js';
 
 export const name = 'skill-gateway';
@@ -164,13 +165,11 @@ export function apply(ctx, config = {}) {
           }
 
           if (action === 'find') {
-            const result = await service.find(cwd, String(args.purpose || ''));
-            return { ok: result.ok, action, result, usageRecorded: false };
+            return buildGatewayToolResponse(action, await service.find(cwd, String(args.purpose || '')));
           }
 
           if (action === 'browse') {
-            const result = await service.browse(cwd, args.sceneId);
-            return { ok: result.ok, action, result, usageRecorded: false };
+            return buildGatewayToolResponse(action, await service.browse(cwd, args.sceneId));
           }
 
           if (action === 'load') {
@@ -179,18 +178,10 @@ export function apply(ctx, config = {}) {
               return { ok: false, action, error: 'load 需要 skillName。', usageRecorded: false };
             }
             const result = await service.load(cwd, skillName, String(args.scenePath || ''), sessionId);
-            return {
-              ok: result.ok,
-              action,
-              result: result.ok
-                ? { skillName: result.skillName, scenePath: result.scenePath, files: result.files }
-                : undefined,
-              error: result.ok ? undefined : result.error,
-              usageRecorded: result.ok ? true : false,
-            };
+            return buildGatewayToolResponse(action, result);
           }
 
-          return { ok: false, action, error: `未知 action：${action}` };
+          return { ok: false, action, error: `未知 action：${action}`, usageRecorded: false };
         } catch (error) {
           const message = error && error.message ? error.message : String(error);
           (ctx.logger || console).warn('[skill-gateway] tool call failed:', message);

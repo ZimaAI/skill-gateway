@@ -122,13 +122,9 @@ export class SkillGatewayService {
     });
     await store.appendUsage(nextUsage.slice(-1));
 
-    return {
-      ok: true,
-      skillName,
-      scenePath: scenePath || undefined,
-      files: loaded.files,
-      usageRecorded: true,
-    };
+    const payload = { ok: true, skillName, files: loaded.files, usageRecorded: true };
+    if (scenePath) payload.scenePath = scenePath;
+    return payload;
   }
 
   async recordAgentSkillUse(cwd, skillName, sessionId = 'session') {
