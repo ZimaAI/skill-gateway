@@ -16,6 +16,7 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const { useState, useEffect, useMemo, useCallback } = React;
     const name = 'skill-gateway-dsh';
+    const identity = (state) => state;
 
     async function api(method, pathname, body) {
       const opts = { method, headers: {} };
@@ -33,25 +34,6 @@ window.__ModuleLoader__.load({
       const sep = pathname.includes('?') ? '&' : '?';
       return cwd ? `${pathname}${sep}cwd=${encodeURIComponent(cwd)}` : pathname;
     };
-
-    function currentCwd(workspaces) {
-      if (!workspaces) return '';
-      const current = workspaces.current;
-      if (current && typeof current === 'object' && current.path) return current.path;
-      if (current && typeof current === 'function') {
-        try {
-          const value = current();
-          if (value && value.path) return value.path;
-        } catch {
-          // Not a snapshot function; fall through.
-        }
-      }
-      const candidates = [workspaces.currentWorkspace, workspaces.defaultWorkspace, workspaces.activeWorkspace];
-      for (const candidate of candidates) {
-        if (candidate && (candidate.path || candidate.cwd)) return candidate.path || candidate.cwd;
-      }
-      return '';
-    }
 
     function cwdFromSnapshot(snapshot) {
       if (!snapshot) return '';
@@ -352,10 +334,10 @@ window.__ModuleLoader__.load({
     const tableStyle = { borderCollapse: 'collapse', width: '100%' };
 
     function SkillGatewayPage(props = {}) {
-      const workspaceSnapshot = typeof props.useWorkspaces === 'function' ? props.useWorkspaces() : null;
-      const sessionsSnapshot = typeof props.useSessions === 'function' ? props.useSessions() : null;
+      const workspaceSnapshot = typeof props.useWorkspaces === 'function' ? props.useWorkspaces(identity) : null;
+      const sessionsSnapshot = typeof props.useSessions === 'function' ? props.useSessions(identity) : null;
       const sessionId = (sessionsSnapshot && sessionsSnapshot.current) || '';
-      const cwd = useMemo(() => cwdFromSnapshot(workspaceSnapshot) || currentCwd((globalThis.__skillGatewayCtx || {}).workspaces), [workspaceSnapshot]);
+      const cwd = useMemo(() => cwdFromSnapshot(workspaceSnapshot), [workspaceSnapshot]);
 
       const [state, setState] = useState(null);
       const [tab, setTab] = useState('catalog');
@@ -392,14 +374,12 @@ window.__ModuleLoader__.load({
           : React.createElement(StatsTab, { cwd, sessionId }));
     }
 
+    const inject = ['slots'];
+
     function apply(ctx) {
-      const slots = ctx && typeof ctx.get === 'function' ? ctx.get('slots') : undefined;
-      if (!slots || typeof slots.inject !== 'function') return;
-      globalThis.__skillGatewayCtx = {
-        workspaces: ctx && typeof ctx.get === 'function' ? ctx.get('workspaces') || null : null,
-      };
-      slots.inject('settings.section', () =>
-        slots.register(
+      if (!ctx || !ctx.slots) return;
+      ctx.slots.inject('settings.section', () =>
+        ctx.slots.register(
           { name: 'settings.section', id: 'skill-gateway', order: 50, label: () => 'Skill Gateway' },
           (props) => React.createElement(SkillGatewayPage, props || {}),
         ),
@@ -407,6 +387,7 @@ window.__ModuleLoader__.load({
     }
 
     exports.name = name;
+    exports.inject = inject;
     exports.apply = apply;
     return module.exports;
   },
