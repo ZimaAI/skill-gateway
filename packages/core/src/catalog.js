@@ -28,6 +28,12 @@ function normalizeSceneInput(input = {}) {
   };
 }
 
+function sceneNameExists(catalog, name, excludeId) {
+  return Object.values(catalog.scenes || {}).some(
+    (scene) => scene.name === name && scene.id !== excludeId,
+  );
+}
+
 /**
  * Create a scene below `parentId`. The returned catalog is a new value; the
  * input catalog is not modified.
@@ -42,6 +48,10 @@ export function createScene(catalog, parentId, input = {}, options = {}) {
 
   const draft = normalizeSceneInput(input);
   if (!draft.name) return { ok: false, error: '场景名称不能为空。' };
+
+  if (sceneNameExists(next, draft.name)) {
+    return { ok: false, error: `场景名称已存在：${draft.name}` };
+  }
 
   let id = options.id || input.id;
   if (!id) {
@@ -75,6 +85,9 @@ export function updateScene(catalog, sceneId, input = {}) {
   if (input.name !== undefined) {
     const name = String(input.name).trim();
     if (!name) return { ok: false, error: '场景名称不能为空。' };
+    if (sceneNameExists(next, name, sceneId)) {
+      return { ok: false, error: `场景名称已存在：${name}` };
+    }
     scene.name = name;
   }
   if (input.description !== undefined) scene.description = String(input.description).trim();

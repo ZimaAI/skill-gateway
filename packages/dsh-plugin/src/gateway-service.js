@@ -28,7 +28,6 @@ const {
   deleteScene: coreDeleteScene,
   deleteSkill: coreDeleteSkill,
   detachSkill: coreDetachSkill,
-  find: coreFind,
   loadSkillFiles,
   recordUsage,
   updateScene: coreUpdateScene,
@@ -101,11 +100,6 @@ export class SkillGatewayService {
       sessionTotal: sessionUsage.length,
       workspaceTotal: workspaceUsage.length,
     };
-  }
-
-  async find(cwd, purpose) {
-    const catalog = await this.ensureCatalog(cwd);
-    return coreFind(catalog, purpose);
   }
 
   async browse(cwd, sceneId) {

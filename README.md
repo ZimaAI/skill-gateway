@@ -1,6 +1,6 @@
 # skill-gateway
 
-一个面向 DeepSeek Harness 的「技能工具网关」插件：把海量技能按**场景**组织成一棵**场景树**，Agent 只能通过 `skill_gateway` 工具按目的、渐进式地取用技能，并持久化记录**会话内使用记录**与**全局统计**。
+一个面向 DeepSeek Harness 的「技能工具网关」插件：把海量技能按**场景**组织成一棵**场景树**，Agent 只能通过 `skill_gateway` 工具沿场景树逐层深入、渐进式地取用技能，并持久化记录**会话内使用记录**与**全局统计**。
 
 ## 仓库结构
 
@@ -23,18 +23,17 @@ npm test
 
 三个测试组覆盖：
 
-- core：场景树 CRUD、find/browse/load、上传校验、使用聚合；
+- core：场景树 CRUD、browse/load、上传校验、使用聚合；
 - repo-store：默认/锚点数据目录、重启读回、并发追加合并、换址迁移；
 - dsh-plugin：网关服务编排、ZIP 解析。
 
 ## 核心契约
 
-`skill_gateway` 工具提供三个 action：
+`skill_gateway` 工具提供两个 action：
 
 | action | 输入 | 输出 |
 | --- | --- | --- |
-| `find` | `purpose` | 命中场景路径 + 该子树递归收集的技能元数据（去重、分组） |
-| `browse` | `sceneId?` | 一个场景节点的 `{ name, description, tags, children, skills }` |
+| `browse` | `sceneId?` | 一个场景节点的 `{ name, description, tags, children, skills }`；省略 `sceneId` 返回根场景 |
 | `load` | `skillName, scenePath?` | 技能文件夹 `{ 相对路径: 文件内容 }`，并记录一条 `gateway` 使用 |
 
 ## 数据落点

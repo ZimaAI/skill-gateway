@@ -3,7 +3,7 @@
  *
  * Responsibilities kept intentionally thin:
  *   - resolve a repository-scoped RepoStore per agent cwd,
- *   - register the `skill_gateway` find/browse/load tool,
+ *   - register the `skill_gateway` browse/load tool,
  *   - inject the positive system-prompt hint,
  *   - observe harness-default `skill` tool results and record agent-skills uses,
  *   - expose JSON routes consumed by the client settings panel.
@@ -30,8 +30,11 @@ export const Config = z.object({
 
 const GATEWAY_HINT = [
   '## Skill gateway',
-  '在开始子任务前，先调用 skill_gateway(find) 按目的查找相关技能；',
-  '确定要使用某个技能后，再调用 skill_gateway(load) 一次性加载该技能全文。',
+  '当子任务可能需要技能时，按以下步骤通过 skill_gateway 沿场景树逐层深入，不要跳过场景或凭空猜测场景 id：',
+  '1. 调用 skill_gateway(action: "browse")，不传 sceneId；工具会返回根场景及其直接子场景和直接挂载的技能元数据。',
+  '2. 如果当前场景的 skills 中已有合适的技能，直接执行第 4 步；否则从返回的 children 中选择最相关的一个子场景，调用 skill_gateway(action: "browse", sceneId: "<该子场景 id>") 进入该场景。',
+  '3. 重复第 2 步逐层深入；每次返回的都只是当前场景的直接子场景和直接技能，不要跳到未返回过的场景。如果当前分支不合适，使用返回的 parentId 退回上一级已浏览过的场景并选择其他子场景。',
+  '4. 调用 skill_gateway(action: "load", skillName: "<技能 name>", scenePath: "<当前场景路径>") 一次性加载该技能全文并应用。',
 ].join('\n');
 
 function firstString(value) {
@@ -113,20 +116,16 @@ export function apply(ctx, config = {}) {
     const tool = defineTool({
       name: 'skill_gateway',
       description:
-        '按目的渐进式取用 skill-gate 中的技能：先用 find 发现技能元数据，再用 browse 浏览场景树，确定后调用 load 一次性加载技能文件夹全文。',
+        '沿 skill-gate 场景树逐层深入并按需加载技能：browse 进入一个场景并返回该场景的直接子场景和直接技能，load 一次性加载选定技能的文件夹全文。',
       parameters: {
         action: {
           type: 'string',
           required: true,
-          description: 'find（按目的匹配场景与技能）、browse（浏览一个场景节点）或 load（加载技能全文）。',
-        },
-        purpose: {
-          type: 'string',
-          description: 'find 使用：用一句目的描述来匹配场景树。',
+          description: 'browse（进入当前已知子场景，或省略 sceneId 返回根场景）或 load（加载技能全文）。',
         },
         sceneId: {
           type: 'string',
-          description: 'browse 使用：场景 id，省略表示根场景。',
+          description: 'browse 使用：要进入的场景 id；省略返回根场景及其直接子场景和直接技能。',
         },
         skillName: {
           type: 'string',
@@ -162,10 +161,6 @@ export function apply(ctx, config = {}) {
           const configState = await service.getConfig(cwd);
           if (!configState.enabled) {
             return { ok: false, action, error: 'skill gateway 已关闭。', usageRecorded: false };
-          }
-
-          if (action === 'find') {
-            return buildGatewayToolResponse(action, await service.find(cwd, String(args.purpose || '')));
           }
 
           if (action === 'browse') {
@@ -311,10 +306,6 @@ export function apply(ctx, config = {}) {
         const body = await readBody(req);
         const scope = body.cwd || cwd;
         const action = String(body.action || '');
-        if (action === 'find') {
-          const result = await service.find(scope, body.purpose);
-          return sendJson(res, 200, { ok: result.ok, action, result, error: result.ok ? undefined : result.error });
-        }
         if (action === 'browse') {
           const result = await service.browse(scope, body.sceneId);
           return sendJson(res, 200, { ok: result.ok, action, result, error: result.ok ? undefined : result.error });

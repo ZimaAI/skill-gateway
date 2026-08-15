@@ -629,8 +629,7 @@ window.__ModuleLoader__.load({
 
     function GatewayTab({ state, cwd, sessionId, onChanged, notify }) {
       const catalog = state.catalog;
-      const [action, setAction] = useState('find');
-      const [purpose, setPurpose] = useState('');
+      const [action, setAction] = useState('browse');
       const [browseSceneId, setBrowseSceneId] = useState(catalog.rootSceneId);
       const [loadSkill, setLoadSkill] = useState(Object.keys(catalog.skills || {})[0] || '');
       const [scenePath, setScenePath] = useState('');
@@ -648,7 +647,6 @@ window.__ModuleLoader__.load({
         setBusy(true);
         try {
           const body = { action, cwd };
-          if (action === 'find') body.purpose = purpose;
           if (action === 'browse') body.sceneId = browseSceneId;
           if (action === 'load') {
             body.skillName = loadSkill;
@@ -683,18 +681,7 @@ window.__ModuleLoader__.load({
       let body = null;
       if (result && result.ok) {
         const value = result.result || {};
-        if (action === 'find') {
-          body = h('div', null,
-            value.matchedSceneId
-              ? h('div', null,
-                  h('div', { className: 'sg-match-head' },
-                    h('span', { className: 'sg-path-pill' }, value.matchedScenePath || ''),
-                    h('span', { className: 'sg-match-note' }, value.matchType === 'skill-secondary' ? '次级匹配：技能 name/description' : '主匹配：场景 name/description/tags')),
-                  h('div', { className: 'sg-skill-result-list' },
-                    (value.skills || []).map((skill) => h(SkillResult, { skill }))),
-                  h(Raw, { value }))
-              : h('div', { className: 'sg-result-empty' }, value.message || '没有匹配的场景或技能。'));
-        } else if (action === 'browse') {
+        if (action === 'browse') {
           body = h('div', null,
             h('div', { className: 'sg-match-head' },
               h('span', { className: 'sg-path-pill' }, value.path || value.name),
@@ -737,14 +724,8 @@ window.__ModuleLoader__.load({
           h('div', { className: 'sg-field' },
             h('label', null, 'action'),
             h('select', { className: 'sg-select', value: action, onChange: (event) => { setAction(event.target.value); setResult(null); } },
-              h('option', { value: 'find' }, 'find(purpose)'),
               h('option', { value: 'browse' }, 'browse(sceneId?)'),
               h('option', { value: 'load' }, 'load(skillName, scenePath?)'))),
-          action === 'find'
-            ? h('div', { className: 'sg-field' },
-                h('label', null, 'purpose'),
-                h('textarea', { className: 'sg-textarea', value: purpose, onChange: (event) => setPurpose(event.target.value), placeholder: '例如：数据库建模和索引设计' }))
-            : null,
           action === 'browse'
             ? h('div', { className: 'sg-field' },
                 h('label', null, 'sceneId'),
@@ -771,7 +752,7 @@ window.__ModuleLoader__.load({
           h('div', { className: 'sg-card-head' },
             h('h3', null, '调用结果'),
             h('span', { className: 'sg-card-sub' }, action)),
-          body || h('div', { className: 'sg-result-empty' }, '运行一次 find / browse / load，结果会显示在这里。')));
+          body || h('div', { className: 'sg-result-empty' }, '运行一次 browse / load，结果会显示在这里。')));
     }
 
     function SkillGatewayOverlay(props = {}) {

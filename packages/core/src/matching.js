@@ -214,8 +214,10 @@ export function browse(catalog, sceneId) {
     return { ok: false, error: '目录无效。' };
   }
   const rootId = catalog.rootSceneId;
-  const id = sceneId && catalog.scenes[sceneId] ? sceneId : rootId;
-  const scene = catalog.scenes[id];
+  const requestedId = sceneId === undefined || sceneId === null || String(sceneId).trim() === ''
+    ? rootId
+    : String(sceneId).trim();
+  const scene = catalog.scenes[requestedId];
   if (!scene) return { ok: false, error: '场景不存在。' };
 
   const children = (scene.children || [])
@@ -243,6 +245,7 @@ export function browse(catalog, sceneId) {
   return {
     ok: true,
     sceneId: scene.id,
+    parentId: scene.parentId || null,
     path: scenePath(catalog, scene.id),
     name: scene.name,
     description: scene.description,
