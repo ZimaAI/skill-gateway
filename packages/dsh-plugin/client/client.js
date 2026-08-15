@@ -393,10 +393,10 @@ window.__ModuleLoader__.load({
     }
 
     function apply(ctx) {
-      const slots = ctx && (ctx.slots || (ctx.get && ctx.get('slots')));
+      const slots = ctx && typeof ctx.get === 'function' ? ctx.get('slots') : undefined;
       if (!slots || typeof slots.inject !== 'function') return;
       globalThis.__skillGatewayCtx = {
-        workspaces: (ctx.get && ctx.get('workspaces')) || ctx.workspaces || null,
+        workspaces: ctx && typeof ctx.get === 'function' ? ctx.get('workspaces') || null : null,
       };
       slots.inject('settings.section', () =>
         slots.register(
