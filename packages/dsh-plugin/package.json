@@ -22,7 +22,7 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-layout"
       ],
       "platform": "web"
     }
@@ -37,7 +37,7 @@
     "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.1"
+    "@deepseek-ai/dsh-client-ui-layout": "^0.1.0-rc.6"
   },
   "license": "MIT",
   "dependencies": {

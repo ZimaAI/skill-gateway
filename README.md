@@ -8,7 +8,7 @@
 packages/
   core/         纯函数核心（无 DSH/Cordis 依赖，输入输出为纯 JSON）
   repo-store/   仓库文件持久化（.skillgate/，锚点换址，并发合并）
-  dsh-plugin/   DeepSeek Harness 动态插件（Host 工具/观察器 + Client 面板）
+  dsh-plugin/   DeepSeek Harness 动态插件（Host 工具/观察器 + 右侧 Skill Gateway 侧边栏）
 prototype/      先行的自包含 HTML 原型（一次性，非生产代码）
 .scratch/
   skill-gate/   领域 spec 与实现 tickets

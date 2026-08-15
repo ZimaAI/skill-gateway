@@ -8,7 +8,7 @@ DeepSeek Harness 动态插件：把仓库中的技能组织为场景树，通过
 - `@skill-gate/core`：纯函数核心（场景树 CRUD、find/browse/load、上传校验、使用聚合）。
 - `@skill-gate/repo-store`：仓库文件持久化（默认 `<cwd>/.skillgate/`，支持锚点换址）。
 - `skill-gateway-dsh/src/host.js`：DSH Host 适配器（工具注册、提示词、观察器、JSON 路由）。
-- `skill-gateway-dsh/client/client.js`：DSH Web Client 设置面板。
+- `skill-gateway-dsh/client/client.js`：DSH Web 右侧 Skill Gateway 侧边栏（shell.overlay）。
 
 ## 安装与挂载
 

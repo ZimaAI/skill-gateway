@@ -17,7 +17,7 @@
 
 实现于 `packages/dsh-plugin/client/client.js` + `src/gateway-service.js` + Host JSON 路由：
 
-- `settings.section`（侧边栏 Settings 入口）挂载「场景树管理」tab。
+- `shell.overlay` 注册右侧 Skill Gateway 侧边栏；面板含「场景树管理」tab。
 - 建/删/嵌套场景，编辑 name/description/tags。
 - 技能多父挂载；删场景级联删子场景且只解链技能。
 - 文件夹/多选 ZIP 上传，一个文件夹/zip=一个技能；校验逐条原因。

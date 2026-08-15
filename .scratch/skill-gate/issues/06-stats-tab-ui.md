@@ -15,7 +15,7 @@
 
 实现于 `packages/dsh-plugin/client/client.js`：
 
-- 设置面板含「统计」tab（与「场景树管理」并列）。
+- 右侧 Skill Gateway 侧边栏含「统计」tab（与「场景树管理」「网关」并列）。
 - 会话内时间线：时间/技能/来源/场景路径；当前会话 id 来自 `useSessions()`，不可用时显示仓库记录。
 - 全局统计：每技能与每场景的次数/占比/最近使用。
 - 来源过滤 gateway / agent-skills / 全部。

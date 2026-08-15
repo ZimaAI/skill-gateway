@@ -316,6 +316,30 @@ export function apply(ctx, config = {}) {
         return sendJson(res, 200, result);
       }
 
+      if (req.method === 'POST' && url.pathname === '/skill-gateway/call') {
+        const body = await readBody(req);
+        const scope = body.cwd || cwd;
+        const action = String(body.action || '');
+        if (action === 'find') {
+          const result = await service.find(scope, body.purpose);
+          return sendJson(res, 200, { ok: result.ok, action, result, error: result.ok ? undefined : result.error });
+        }
+        if (action === 'browse') {
+          const result = await service.browse(scope, body.sceneId);
+          return sendJson(res, 200, { ok: result.ok, action, result, error: result.ok ? undefined : result.error });
+        }
+        if (action === 'load') {
+          const result = await service.load(scope, body.skillName, body.scenePath || '', body.sessionId || 'session');
+          return sendJson(res, 200, {
+            ok: result.ok,
+            action,
+            result: result.ok ? { skillName: result.skillName, scenePath: result.scenePath, files: result.files } : undefined,
+            error: result.ok ? undefined : result.error,
+          });
+        }
+        return sendJson(res, 400, { ok: false, action, error: `未知 action：${action}` });
+      }
+
       if (req.method === 'POST' && url.pathname === '/skill-gateway/scenes') {
         const body = await readBody(req);
         const scope = body.cwd || cwd;
@@ -377,6 +401,7 @@ export function apply(ctx, config = {}) {
 
   for (const spec of [
     { kind: 'exact', path: '/skill-gateway/state', handler: route },
+    { kind: 'exact', path: '/skill-gateway/call', handler: route },
     { kind: 'exact', path: '/skill-gateway/stats', handler: route },
     { kind: 'exact', path: '/skill-gateway/toggle', handler: route },
     { kind: 'exact', path: '/skill-gateway/scenes', handler: route },
