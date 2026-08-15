@@ -83,12 +83,24 @@ export class SkillGatewayService {
     const usage = await this.storeFor(cwd).loadUsage();
     const source = options.source || 'all';
     const sessionId = options.sessionId;
-    const visible = usage.filter((record) => {
+    const matchesSource = (record) => source === 'all' || String(record.source || 'gateway') === source;
+
+    // The timeline is session-scoped; global statistics are workspace-scoped
+    // and intentionally include every session that has used skills in `cwd`.
+    const sessionUsage = usage.filter((record) => {
+      if (!matchesSource(record)) return false;
       if (sessionId && String(record.sessionId || 'session') !== String(sessionId)) return false;
-      if (source !== 'all' && String(record.source || 'gateway') !== source) return false;
       return true;
     });
-    return { ok: true, usage: visible, stats: aggregateUsage(visible, 'all') };
+    const workspaceUsage = usage.filter(matchesSource);
+
+    return {
+      ok: true,
+      usage: sessionUsage,
+      stats: aggregateUsage(workspaceUsage, 'all'),
+      sessionTotal: sessionUsage.length,
+      workspaceTotal: workspaceUsage.length,
+    };
   }
 
   async find(cwd, purpose) {

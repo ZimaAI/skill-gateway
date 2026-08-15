@@ -574,12 +574,12 @@ window.__ModuleLoader__.load({
           h('div', { className: 'sg-chips' },
             [['all', '全部'], ['gateway', 'gateway'], ['agent-skills', 'agent-skills']].map(([value, label]) =>
               h('button', { key: value, className: source === value ? 'sg-active' : undefined, onClick: () => setSource(value) }, label))),
-          h('span', { className: 'sg-card-sub', style: { marginLeft: 'auto' } }, `共 ${aggregate.total} 次使用`)),
+          h('span', { className: 'sg-card-sub', style: { marginLeft: 'auto' } }, `工作区共 ${aggregate.total} 次使用`)),
         h('div', { className: 'sg-stats-grid' },
           h('section', { className: 'sg-card sg-timeline-card' },
             h('div', { className: 'sg-card-head' },
               h('h3', null, '会话内时间线'),
-              h('span', { className: 'sg-card-sub' }, `${timeline.length} records`)),
+              h('span', { className: 'sg-card-sub' }, `当前会话 ${timeline.length} 条`)),
             timeline.length
               ? h('div', { className: 'sg-timeline' },
                   timeline.map((record) =>
@@ -597,7 +597,7 @@ window.__ModuleLoader__.load({
           h('section', { className: 'sg-card' },
             h('div', { className: 'sg-card-head' },
               h('h3', null, '全局统计 / 按技能'),
-              h('span', { className: 'sg-card-sub' }, `${aggregate.total} 次使用`)),
+              h('span', { className: 'sg-card-sub' }, `工作区 ${aggregate.total} 次使用`)),
             aggregate.skills.length
               ? h('div', { className: 'sg-table-scroll' },
                   h('table', { className: 'sg-table' },

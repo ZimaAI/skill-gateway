@@ -41,20 +41,29 @@ test('service upload validates, persists files, and rejects duplicate without co
   assert.equal(confirmed.updated, true);
 });
 
-test('service stats filter by source and session', async (t) => {
+test('service stats keeps the timeline session-scoped and globals workspace-scoped', async (t) => {
   const { service } = await tempService(t);
-  await service.uploadSkill(undefined, {
-    files: [{ path: 'SKILL.md', content: '---\nname: tdd\ndescription: test first\n---\n' }],
-  });
+  const files = [{ path: 'SKILL.md', content: '---\nname: tdd\ndescription: test first\n---\n' }];
+  await service.uploadSkill(undefined, { files });
   await service.recordAgentSkillUse(undefined, 'tdd', 's1');
+  await service.recordAgentSkillUse(undefined, 'code-review', 's3');
   await service.load(undefined, 'tdd', '', 's2');
+
   const all = await service.stats();
-  assert.equal(all.usage.length, 2);
+  assert.equal(all.usage.length, 3);
+  assert.equal(all.stats.total, 3);
+  assert.equal(all.workspaceTotal, 3);
+
   const s1 = await service.stats(undefined, { sessionId: 's1' });
   assert.equal(s1.usage.length, 1);
-  assert.equal(s1.stats.skills[0].skillName, 'tdd');
+  assert.equal(s1.sessionTotal, 1);
+  // Globals are NOT session-filtered: tdd appears in s1 + s2, code-review in s3.
+  assert.equal(s1.stats.total, 3);
+  assert.deepEqual(s1.stats.skills.map((entry) => entry.skillName), ['tdd', 'code-review']);
+
   const gateway = await service.stats(undefined, { source: 'gateway' });
   assert.equal(gateway.usage.length, 1);
+  assert.equal(gateway.stats.total, 1);
   assert.equal(gateway.usage[0].source, 'gateway');
 });
 
