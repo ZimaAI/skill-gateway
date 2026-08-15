@@ -368,12 +368,12 @@ window.__ModuleLoader__.load({
 
     function UploadReport({ items }) {
       if (!items || !items.length) return null;
-      const ok = items.every((item) => item.ok || item.skipped);
+      const ok = items.every((item) => item.ok);
       return h('div', { className: 'sg-upload-report' + (ok ? ' sg-ok' : '') },
-        h('div', null, ok ? '上传完成' : '部分项目未导入'),
+        h('div', null, ok ? '场景树上传完成' : '场景树上传失败'),
         h('ul', null, items.map((item, index) =>
           h('li', { key: index, className: item.ok ? undefined : 'sg-reason' },
-            `${item.name || '(未命名)'}: ${item.ok || item.skipped ? '已导入' : (item.reasons || [item.error]).join('；')}`))));
+            `${item.name || '(未命名)'}: ${item.summary || (item.reasons || [item.error]).join('；')}`))));
     }
 
     function CatalogTab({ state, cwd, refresh, notify }) {
@@ -427,61 +427,58 @@ window.__ModuleLoader__.load({
         await refresh();
       };
 
-      const uploadItems = async (items) => {
-        const next = [];
-        for (const item of items) {
-          try {
-            let result = await api('POST', withCwd('/skill-gateway/upload', cwd), { item, cwd });
-            if (result.ok === false && result.confirmRequired) {
-              const skill = result.existingSkill;
-              if (window.confirm(`技能「${skill.name}」已存在。确认原地更新并保留使用历史？`)) {
-                result = await api('POST', withCwd('/skill-gateway/upload', cwd), { item, cwd, confirm: true });
-              } else {
-                result = { ok: true, skipped: true };
-              }
-            }
-            next.push(result.ok || result.skipped ? { ok: true, name: item.name || result.skillName, skipped: result.skipped } : result);
-          } catch (error) {
-            next.push({ ok: false, name: item.name, error: error.message });
+      const uploadSceneTree = async (name, files) => {
+        let item;
+        try {
+          const result = await api('POST', withCwd('/skill-gateway/scene-tree/upload', cwd), { item: { name, files }, cwd });
+          if (!result.ok) {
+            item = result;
+          } else {
+            const counts = result.sceneCounts || {};
+            const parts = [
+              `新增场景 ${counts.created || 0} 个`,
+              `复用场景 ${counts.reused || 0} 个`,
+              `导入技能 ${result.skillsImported || 0} 个`,
+              `覆盖更新 ${result.skillsUpdated || 0} 个`,
+            ];
+            item = { ok: true, name: name || result.name, summary: parts.join(' · ') };
           }
+        } catch (error) {
+          item = { ok: false, name, error: error.message };
         }
-        setReport(next);
-        notify(next.every((item) => item.ok || item.skipped) ? '上传完成' : '上传完成，部分项目未导入');
+        setReport([item]);
+        notify(item.ok ? `场景树「${name}」上传完成` : `场景树「${name}」上传失败`);
         await refresh();
       };
       const onFolder = async (event) => {
         const input = event.target;
         const files = [...(input.files || [])];
-        if (!files.length) return;
-        const byRoot = new Map();
-        for (const file of files) {
-          const rel = file.webkitRelativePath || file.name;
-          const parts = rel.split('/').filter(Boolean);
-          if (!parts.length) continue;
-          const root = parts[0];
-          if (!byRoot.has(root)) byRoot.set(root, []);
-          byRoot.get(root).push({ path: rel, content: await file.text() });
-        }
-        if (byRoot.size !== 1) {
-          setReport([{ ok: false, name: '文件夹上传', reasons: ['一次只能选择一个技能文件夹。'] }]);
+        if (!files.length) {
+          setReport([{ ok: false, name: '场景树文件夹', reasons: ['文件夹为空。'] }]);
           input.value = '';
           return;
         }
-        await uploadItems([...byRoot.entries()].map(([root, fileList]) => ({ name: root, files: fileList })));
-        input.value = '';
-      };
-      const onZips = async (event) => {
-        const input = event.target;
-        const items = [];
-        for (const file of [...(input.files || [])]) {
-          const bytes = new Uint8Array(await file.arrayBuffer());
-          let binary = '';
-          const chunk = 0x8000;
-          for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-          items.push({ name: file.name, zipBase64: btoa(binary) });
+        const roots = new Set();
+        const uploadedFiles = [];
+        try {
+          for (const file of files) {
+            const rel = file.webkitRelativePath || file.name;
+            const parts = rel.split('/').filter(Boolean);
+            if (!parts.length) continue;
+            roots.add(parts[0]);
+            uploadedFiles.push({ path: rel, content: await file.text() });
+          }
+        } catch (error) {
+          input.value = '';
+          setReport([{ ok: false, name: '场景树文件夹', error: error.message }]);
+          return;
         }
-        await uploadItems(items);
         input.value = '';
+        if (roots.size !== 1) {
+          setReport([{ ok: false, name: '场景树文件夹', reasons: ['一次只能选择一个场景树文件夹。'] }]);
+          return;
+        }
+        await uploadSceneTree([...roots][0], uploadedFiles);
       };
 
       const skillNames = Object.keys(catalog.skills || {}).sort();
@@ -493,13 +490,11 @@ window.__ModuleLoader__.load({
               h('span', { className: 'sg-card-sub' }, `${Object.keys(catalog.scenes || {}).length} scenes`)),
             h(SceneTree, { catalog, selectedId, onSelect: setSelectedId, onAddChild: addChild, onDeleteScene: deleteScene })),
           h('section', { className: 'sg-card' },
-            h('div', { className: 'sg-card-head' }, h('h3', null, '上传技能')),
+            h('div', { className: 'sg-card-head' }, h('h3', null, '上传场景树')),
             h('div', { className: 'sg-toolbar' },
-              h('label', { className: 'sg-btn', htmlFor: 'sg-folder-input' }, '上传文件夹'),
-              h('input', { id: 'sg-folder-input', type: 'file', webkitdirectory: '', style: { display: 'none' }, onChange: onFolder }),
-              h('label', { className: 'sg-btn', htmlFor: 'sg-zip-input' }, '上传 ZIP（可多选）'),
-              h('input', { id: 'sg-zip-input', type: 'file', accept: '.zip', multiple: true, style: { display: 'none' }, onChange: onZips })),
-            h('div', { className: 'sg-help' }, '一个文件夹或一个 zip = 一个技能；同名上传需确认后原地更新。'),
+              h('label', { className: 'sg-btn', htmlFor: 'sg-folder-input' }, '选择场景树文件夹'),
+              h('input', { id: 'sg-folder-input', type: 'file', webkitdirectory: '', style: { display: 'none' }, onChange: onFolder })),
+            h('div', { className: 'sg-help' }, '所选文件夹作为场景树根目录：没有 SKILL.md 的文件夹识别为场景，含 SKILL.md 的文件夹整体导入为技能。相同场景复用，同名技能覆盖更新。'),
             h(UploadReport, { items: report }))),
         h('div', null,
           h('section', { className: 'sg-card' },
@@ -552,7 +547,7 @@ window.__ModuleLoader__.load({
                       h('div', { className: 'sg-skill-paths' }, paths.length ? paths.join('  ·  ') : '未挂载到任何场景')),
                     h('button', { className: 'sg-btn sg-btn-sm sg-btn-danger', onClick: () => deleteSkill(skillName) }, '删除'));
                 }))
-              : h('div', { className: 'sg-empty' }, '还没有技能。上传一个文件夹或 ZIP 开始。'))));
+              : h('div', { className: 'sg-empty' }, '还没有技能。上传一个场景树文件夹开始。'))));
     }
 
     function StatsTab({ cwd, sessionId }) {

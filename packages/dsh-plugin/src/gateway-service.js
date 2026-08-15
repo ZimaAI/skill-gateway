@@ -28,6 +28,7 @@ const {
   deleteScene: coreDeleteScene,
   deleteSkill: coreDeleteSkill,
   detachSkill: coreDetachSkill,
+  importSceneTree: coreImportSceneTree,
   loadSkillFiles,
   recordUsage,
   updateScene: coreUpdateScene,
@@ -219,6 +220,47 @@ export class SkillGatewayService {
       catalog: upsert.catalog,
       fileCount: Object.keys(skill.files).length,
     };
+  }
+
+  async uploadSceneTree(cwd, item, options = {}) {
+    const source = Array.isArray(item) ? { files: item } : item || {};
+    if (!Array.isArray(source.files) || !source.files.length) {
+      return { ok: false, reasons: ['uploadSceneTree 需要非空的 item.files。'], name: source.name || null };
+    }
+
+    const store = this.storeFor(cwd);
+    const catalog = await store.ensureCatalog();
+    const result = coreImportSceneTree(catalog, source, {
+      now: options.now === undefined ? this.now() : options.now,
+      rootName: options.rootName,
+      rootPath: options.rootPath,
+      random: options.random,
+    });
+    if (!result.ok) return result;
+
+    for (const skill of result.skills) {
+      await store.saveSkillFiles(skill.name, skill.files);
+    }
+    await store.saveCatalog(result.catalog);
+
+    return {
+      ok: true,
+      catalog: result.catalog,
+      name: result.name,
+      scenesCreated: result.scenesCreated,
+      scenesReused: result.scenesReused,
+      sceneCounts: result.sceneCounts,
+      skillsImported: result.skillsImported,
+      skillsCreated: result.skillsCreated,
+      skillsUpdated: result.skillsUpdated,
+      skillNames: result.skillNames,
+      fileCount: result.fileCount,
+      ignoredFiles: result.ignoredFiles,
+    };
+  }
+
+  async importSceneTree(cwd, item, options = {}) {
+    return this.uploadSceneTree(cwd, item, options);
   }
 
   async deleteSkill(cwd, skillName) {

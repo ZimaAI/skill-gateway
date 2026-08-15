@@ -15,6 +15,8 @@
 
 ## Comments
 
+> 后续更新：ZIP 上传已移除；文件夹上传改为「上传场景树」，按 SKILL.md 有无递归识别场景与技能。
+
 实现于 `packages/dsh-plugin/client/client.js` + `src/gateway-service.js` + Host JSON 路由：
 
 - `shell.overlay` 注册右侧 Skill Gateway 侧边栏；面板含「场景树管理」tab。

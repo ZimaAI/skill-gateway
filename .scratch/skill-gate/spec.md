@@ -24,9 +24,9 @@ Status: ready-for-agent
 9. As a user, I want to create scenes with a name, description, and tags and nest them to arbitrary depth under a single root, so that I can build a classification tree that mirrors my work.
 10. As a user, I want a scene to hold both child scenes and skills, so that a mid-level scene can group skills directly when appropriate.
 11. As a user, I want to attach one skill to multiple scenes, so that a skill is reachable from every context where it applies.
-12. As a user, I want to upload skill folders and zip archives in a multi-select, so that I can batch-import skills.
-13. As a user, I want each uploaded folder (or each zip) to be treated as exactly one skill, so that the mapping between folder and skill is unambiguous.
-14. As a user, I want uploads validated — a root SKILL.md whose frontmatter carries a non-empty, well-formed name and description — with per-item error messages, so that broken skills never enter the catalog.
+12. As a user, I want to upload one scene-tree folder, so that I can import a whole tree of scenes and skills in a single operation.
+13. As a user, I want folders without SKILL.md to become scenes and folders with SKILL.md to become skills whose whole subtree is imported as assets, so that the folder tree maps unambiguously to the scene tree.
+14. As a user, I want scene-tree uploads validated — every SKILL.md needs non-empty, well-formed name and description — with per-item error messages, so that broken skills never enter the catalog.
 15. As a user, I want re-uploading a same-name skill to update it in place, so that I can iterate on a skill without losing its usage history.
 16. As a user, I want to delete a skill and have it unlinked from every scene and its files removed while its historical stats are retained, so that history stays honest.
 17. As a user, I want to delete a scene and have its children cascade-delete while its skills are only unlinked (files kept), so that shared skills survive.
@@ -81,8 +81,9 @@ The core module's public surface mirrors these three behaviors plus catalog CRUD
 
 - **Progressive loading**: discovery returns metadata only; full content is fetched only by an explicit `load`.
 - **Keyword matching**: tokenize the purpose and score scenes by matches against `name`/`description`/`tags`; skills match secondarily on `name`/`description`. A scene hit returns the entire subtree's skills.
-- **Upload validation**: each uploaded folder/zip must contain exactly one root `SKILL.md` whose frontmatter parses to a non-empty `name` (matching `[a-z0-9][a-z0-9-]*`) and `description`; otherwise the whole item is rejected with per-item reasons.
-- **Duplicate names**: uploading a skill whose name already exists updates that skill in place, preserving the name key and its usage history, after a confirmation.
+- **Scene-tree upload**: the selected folder is the scene-tree root and merges into the existing root; a folder without a direct `SKILL.md` is a scene, while a folder with one is a skill whose entire subtree is imported as assets. Existing scenes on the same path are reused rather than duplicated.
+- **Upload validation**: every skill found in an uploaded scene tree must have a root `SKILL.md` whose frontmatter parses to a non-empty `name` (matching `[a-z0-9][a-z0-9-]*`) and `description`; otherwise the whole upload is rejected with per-item reasons.
+- **Duplicate names**: scene-tree upload overwrites an existing same-name skill in place, preserving the name key, existing scene attachments and usage history. Direct single-skill upload keeps its confirmation flow.
 - **Deletion**: deleting a skill unlinks it from all scenes and removes its files but keeps its historical usage; deleting a scene cascades to its children and unlinks (does not delete) its skills.
 - **Toggle**: repository-scoped, default on. Off removes the tool and the prompt but keeps the statistics observer running.
 - **Statistics**: the observer records gateway `load` calls and harness-default `skill` tool calls alike; global stats are repository-wide and all-time, computed as per-skill trigger count, share of all triggers, and last-used time, plus per-scene aggregation, filterable by source.
@@ -97,7 +98,7 @@ The core module's public surface mirrors these three behaviors plus catalog CRUD
 
 A good test asserts external behavior — the observable input→output contract — never internal implementation.
 
-- **What to test**: the core module's public functions only. In particular: `find` matching and subtree assembly, `browse` shape, `load`'s folder→map rendering, upload validation rules, duplicate-update semantics, delete/unlink semantics, and usage aggregation (counts, share, last-used, per-scene, source filter).
+- **What to test**: the core module's public functions only. In particular: `find` matching and subtree assembly, `browse` shape, `load`'s folder→map rendering, scene-tree upload parsing/merge rules, duplicate-update semantics, delete/unlink semantics, and usage aggregation (counts, share, last-used, per-scene, source filter).
 - **What not to test**: the DSH adapters (filesystem service, tool registration, statistics observer, RPC, Slots UI) — these are verified by integration in the GUI, not by unit tests.
 - **Prior art**: the repository has no existing tests, so this establishes the pattern — pure, dependency-free tests with no DSH runtime.
 

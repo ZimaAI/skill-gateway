@@ -1,7 +1,7 @@
 {
   "name": "@skill-gate/core",
   "version": "0.1.0",
-  "description": "Pure, framework-free core for the skill-gateway: catalog CRUD, find/browse/load, upload validation, usage recording and aggregation.",
+  "description": "Pure, framework-free core for the skill-gateway: catalog CRUD, find/browse/load, scene-tree upload merge, usage recording and aggregation.",
   "type": "module",
   "main": "./src/index.js",
   "exports": {

@@ -41,5 +41,5 @@ export {
   skillMatchScore,
   tokenize,
 } from './matching.js';
-export { parseFrontmatter, validateUpload } from './upload.js';
+export { importSceneTree, mergeSceneTree, parseFrontmatter, uploadSceneTree, validateUpload } from './upload.js';
 export { aggregateUsage, recordUsage } from './usage.js';

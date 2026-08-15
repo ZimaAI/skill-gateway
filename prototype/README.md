@@ -21,7 +21,7 @@ python3 -m http.server 8000 --directory prototype
 
 - 侧边栏底部入口 + 面板（场景树管理 / 统计 / 网关三个 tab，网关 tab 用于原型演示工具调用）。
 - 场景树：单根、不限深度、子场景与直接技能并存、一个技能多父挂载。
-- 上传：文件夹（webkitdirectory）与 zip（内置最小解析器），根 SKILL.md 校验、逐条原因、同名更新二次确认。
+- 上传：文件夹（webkitdirectory），根 SKILL.md 校验、逐条原因、同名更新二次确认。
 - 删除：技能全场景解链 + 移除文件 + 保留历史统计；场景级联删除子场景但只解链技能。
 - 网关：find（场景主匹配、技能次级匹配）→ browse → load，渐进式加载；load 记录 source=gateway。
 - 统计：会话时间线、全局按技能 / 按场景聚合、来源过滤；模拟 harness 默认 skill 调用记录 source=agent-skills。
@@ -32,5 +32,4 @@ python3 -m http.server 8000 --directory prototype
 ## 边界
 
 - 状态仅存内存，不实现 ADR-0001 的文件持久化与并发合并。
-- zip 解析支持标准 ZIP（store / deflate），不支持 zip64 和加密 zip。
 - 上传的真实文件读取依赖浏览器 File API；旧浏览器请用「导入示例技能」体验流程。

@@ -16,7 +16,6 @@ import z from '@deepseek-ai/schemastery';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { SkillGatewayService } from './gateway-service.js';
 import { buildGatewayToolResponse } from './tool-response.js';
-import { unzip } from './zip.js';
 
 export const name = 'skill-gateway';
 export const inject = ['tools', 'systemPrompt', 'webServer'];
@@ -353,18 +352,19 @@ export function apply(ctx, config = {}) {
         return sendJson(res, 400, { ok: false, error: '未知 action。' });
       }
 
-      if (req.method === 'POST' && url.pathname === '/skill-gateway/upload') {
+      if (req.method === 'POST' && (url.pathname === '/skill-gateway/upload' || url.pathname === '/skill-gateway/scene-tree/upload')) {
         const body = await readBody(req);
         const scope = body.cwd || cwd;
-        let item = body.item || null;
-        if (body.zipBase64 || (item && item.zipBase64)) {
-          const files = unzip(Buffer.from(body.zipBase64 || item.zipBase64, 'base64'));
-          item = { name: body.name || (item && item.name) || 'archive.zip', files };
+        if (body.zipBase64 !== undefined || (body.item && body.item.zipBase64 !== undefined)) {
+          return sendJson(res, 400, { ok: false, error: 'ZIP 上传已移除，请上传场景树文件夹（item.files）。' });
         }
+        let item = body.item || (body.files ? { name: body.name, files: body.files } : null);
+        if (Array.isArray(item)) item = { name: body.name, files: item };
         if (!item || !Array.isArray(item.files)) {
-          return sendJson(res, 400, { ok: false, error: 'upload 需要 item.files 或 zipBase64。' });
+          return sendJson(res, 400, { ok: false, error: 'upload 需要场景树文件夹 item.files。' });
         }
-        return sendJson(res, 200, await service.uploadSkill(scope, item, { confirm: body.confirm === true }));
+        const result = await service.uploadSceneTree(scope, item, body.options || {});
+        return sendJson(res, 200, result);
       }
 
       if (req.method === 'POST' && url.pathname === '/skill-gateway/skills/delete') {
@@ -393,6 +393,7 @@ export function apply(ctx, config = {}) {
     { kind: 'exact', path: '/skill-gateway/scenes', handler: route },
     { kind: 'exact', path: '/skill-gateway/scenes/skills', handler: route },
     { kind: 'exact', path: '/skill-gateway/upload', handler: route },
+    { kind: 'exact', path: '/skill-gateway/scene-tree/upload', handler: route },
     { kind: 'exact', path: '/skill-gateway/skills/delete', handler: route },
     { kind: 'exact', path: '/skill-gateway/relocate', handler: route },
   ]) {

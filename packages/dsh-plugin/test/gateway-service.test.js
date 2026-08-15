@@ -41,6 +41,45 @@ test('service upload validates, persists files, and rejects duplicate without co
   assert.equal(confirmed.updated, true);
 });
 
+test('service uploadSceneTree persists scenes/skills and overwrites same-name skills', async (t) => {
+  const { service } = await tempService(t);
+  const item = {
+    name: 'scene-tree',
+    files: [
+      { path: 'scene-tree/后端开发/数据库设计/SKILL.md', content: '---\nname: db-schema-design\ndescription: 第一版\n---\n# v1' },
+      { path: 'scene-tree/后端开发/数据库设计/templates/init.sql', content: 'select 1;' },
+      { path: 'scene-tree/前端开发/README.md', content: 'ignored' },
+    ],
+  };
+
+  const first = await service.uploadSceneTree(undefined, item);
+  assert.equal(first.ok, true);
+  assert.equal(first.sceneCounts.created, 2);
+  assert.equal(first.sceneCounts.reused, 0);
+  assert.equal(first.skillsImported, 1);
+  assert.equal(first.skillsCreated, 1);
+
+  const loaded = await service.storeFor(undefined).loadSkillFiles('db-schema-design');
+  assert.deepEqual(Object.keys(loaded).sort(), ['SKILL.md', 'templates/init.sql']);
+
+  const second = await service.uploadSceneTree(undefined, {
+    name: 'scene-tree',
+    files: [
+      { path: 'scene-tree/后端开发/数据库设计/SKILL.md', content: '---\nname: db-schema-design\ndescription: 第二版\n---\n# v2' },
+      { path: 'scene-tree/后端开发/数据库设计/extra.md', content: 'extra' },
+    ],
+  });
+  assert.equal(second.ok, true);
+  assert.equal(second.sceneCounts.created, 0);
+  assert.equal(second.sceneCounts.reused, 1);
+  assert.equal(second.skillsUpdated, 1);
+  assert.equal(second.skillsCreated, 0);
+
+  const overwritten = await service.storeFor(undefined).loadSkillFiles('db-schema-design');
+  assert.deepEqual(Object.keys(overwritten).sort(), ['SKILL.md', 'extra.md']);
+  assert.match(overwritten['SKILL.md'], /第二版/);
+});
+
 test('service stats keeps the timeline session-scoped and globals workspace-scoped', async (t) => {
   const { service } = await tempService(t);
   const files = [{ path: 'SKILL.md', content: '---\nname: tdd\ndescription: test first\n---\n' }];

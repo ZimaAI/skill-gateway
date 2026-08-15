@@ -11,6 +11,7 @@ import {
   deleteSkill,
   detachSkill,
   find,
+  importSceneTree,
   loadSkillFiles,
   parseFrontmatter,
   recordUsage,
@@ -189,7 +190,7 @@ test('validateUpload imports every root asset and ignores nested SKILL.md files'
   ]);
 });
 
-test('validateUpload strips one wrapper folder from zip-style paths', () => {
+test('validateUpload strips one wrapper folder from folder-upload paths', () => {
   const result = validateUpload({
     files: [
       { path: 'tdd-main/SKILL.md', content: '---\nname: tdd\ndescription: test first\n---\n' },
@@ -239,6 +240,128 @@ test('recordUsage and aggregateUsage compute counts, share, last-used, per-scene
   const session = aggregateUsage(usage, { sessionId: 's1' });
   assert.equal(session.total, 2);
   assert.deepEqual(session.skills.map((skill) => skill.skillName).sort(), ['code-review', 'tdd']);
+});
+
+test('importSceneTree turns folders into scenes and skill folders into skill files', () => {
+  const result = importSceneTree(createCatalog(), {
+    name: 'scenes',
+    files: [
+      { path: 'scenes/后端开发/数据库设计/SKILL.md', content: '---\nname: db-schema-design\ndescription: 数据库结构设计\n---\n# DB' },
+      { path: 'scenes/后端开发/数据库设计/templates/init.sql', content: 'select 1;' },
+      { path: 'scenes/后端开发/接口设计/README.md', content: '# notes' },
+      { path: 'scenes/后端开发/数据库设计/references/SKILL.md', content: '---\nname: nested-not-a-skill\ndescription: nested asset\n---\n' },
+    ],
+  }, { now: 500 });
+
+  assert.equal(result.ok, true);
+  const { catalog } = result;
+  const rootChildren = catalog.scenes.root.children.map((id) => catalog.scenes[id].name);
+  assert.deepEqual(rootChildren, ['后端开发']);
+  const backend = catalog.scenes[catalog.scenes.root.children[0]];
+  assert.deepEqual(backend.children.map((id) => catalog.scenes[id].name), ['接口设计']);
+  assert.deepEqual(backend.skills, ['db-schema-design']);
+  assert.deepEqual(Object.keys(catalog.skills), ['db-schema-design']);
+  assert.equal(catalog.skills['db-schema-design'].updatedAt, 500);
+  assert.equal(result.fileCount, 3);
+  assert.deepEqual(result.ignoredFiles, ['后端开发/接口设计/README.md']);
+  assert.deepEqual(Object.keys(result.skills[0].files).sort(), [
+    'SKILL.md',
+    'references/SKILL.md',
+    'templates/init.sql',
+  ]);
+});
+
+test('importSceneTree reuses overlapping scenes and overwrites same-name skills in place', () => {
+  let catalog = createCatalog();
+  catalog = createScene(catalog, 'root', { name: '后端开发', description: '已有后端场景' }, { id: 'backend' }).catalog;
+  catalog = upsertSkill(catalog, 'db-schema-design', '旧描述', 100).catalog;
+  catalog = attachSkill(catalog, 'backend', 'db-schema-design').catalog;
+
+  const first = importSceneTree(catalog, {
+    name: 'tree',
+    files: [
+      { path: 'tree/后端开发/数据库设计/SKILL.md', content: '---\nname: db-schema-design\ndescription: 新描述\n---\n# new' },
+      { path: 'tree/后端开发/数据库设计/extra.md', content: 'extra' },
+      { path: 'tree/前端开发/界面设计/SKILL.md', content: '---\nname: frontend-design\ndescription: 前端设计\n---\n# fe' },
+    ],
+  }, { now: 900 });
+
+  assert.equal(first.ok, true);
+  assert.deepEqual(first.scenesCreated.map((id) => first.catalog.scenes[id].name), ['前端开发']);
+  assert.deepEqual(first.scenesReused, ['backend']);
+  assert.equal(first.catalog.scenes.backend.name, '后端开发');
+  assert.equal(first.catalog.scenes.backend.description, '已有后端场景');
+  assert.deepEqual(first.catalog.scenes.backend.skills, ['db-schema-design']);
+  assert.equal(first.catalog.skills['db-schema-design'].description, '新描述');
+  assert.equal(first.catalog.skills['db-schema-design'].createdAt, 100);
+  assert.equal(first.catalog.skills['db-schema-design'].updatedAt, 900);
+  assert.equal(first.skillsUpdated, 1);
+  assert.equal(first.skillsCreated, 1);
+  const dbSkill = first.skills.find((skill) => skill.name === 'db-schema-design');
+  assert.deepEqual(Object.keys(dbSkill.files).sort(), ['SKILL.md', 'extra.md']);
+
+  const second = importSceneTree(first.catalog, {
+    name: 'tree',
+    files: [
+      { path: 'tree/后端开发/数据库设计/SKILL.md', content: '---\nname: db-schema-design\ndescription: 再次覆盖\n---\n# newest' },
+      { path: 'tree/前端开发/README.md', content: 'ignored' },
+    ],
+  }, { now: 1200 });
+
+  assert.equal(second.ok, true);
+  assert.equal(second.scenesCreated.length, 0);
+  assert.equal(second.scenesReused.length, 2);
+  assert.ok(second.scenesReused.includes('backend'));
+  assert.equal(second.catalog.scenes.backend.id, 'backend');
+  assert.equal(second.skillsUpdated, 1);
+  const updatedDbSkill = second.skills.find((skill) => skill.name === 'db-schema-design');
+  assert.deepEqual(Object.keys(updatedDbSkill.files), ['SKILL.md']);
+  assert.equal(second.catalog.skills['db-schema-design'].updatedAt, 1200);
+  assert.equal(Object.keys(second.catalog.scenes).length, 3);
+});
+
+test('importSceneTree treats a root SKILL.md as a skill attached to the root scene', () => {
+  const result = importSceneTree(createCatalog(), {
+    name: 'tree',
+    files: [
+      { path: 'tree/SKILL.md', content: '---\nname: root-skill\ndescription: root skill\n---\n# root' },
+      { path: 'tree/assets/guide.md', content: '# guide' },
+      { path: 'tree/assets/SKILL.md', content: '---\nname: nested-asset\ndescription: not a separate skill\n---\n' },
+    ],
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.sceneCounts, { created: 0, reused: 0 });
+  assert.deepEqual(result.catalog.scenes.root.skills, ['root-skill']);
+  assert.deepEqual(Object.keys(result.catalog.skills), ['root-skill']);
+  assert.deepEqual(Object.keys(result.skills[0].files).sort(), ['SKILL.md', 'assets/SKILL.md', 'assets/guide.md']);
+});
+
+test('importSceneTree accepts root-relative paths when no wrapper name is provided', () => {
+  const result = importSceneTree(createCatalog(), {
+    files: [
+      { path: '后端开发/数据库设计/SKILL.md', content: '---\nname: db-schema-design\ndescription: 数据库设计\n---\n# DB' },
+      { path: '空场景/', content: '' },
+    ],
+  }, { now: 500 });
+
+  assert.equal(result.ok, true);
+  const names = result.scenesCreated.map((id) => result.catalog.scenes[id].name);
+  assert.deepEqual(names, ['后端开发', '空场景']);
+  assert.deepEqual(result.skillNames, ['db-schema-design']);
+});
+
+test('importSceneTree rejects invalid skills before changing the catalog', () => {
+  const before = seedCatalog();
+  const result = importSceneTree(before, {
+    name: 'tree',
+    files: [
+      { path: 'tree/新场景/SKILL.md', content: '---\nname: Bad Name\ndescription: x\n---\n' },
+    ],
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.reasons.join(' '), /name 不符合/);
+  assert.equal(result.catalog, undefined);
 });
 
 test('parseFrontmatter reads quoted scalar values', () => {
