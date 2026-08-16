@@ -16,6 +16,7 @@ import z from '@deepseek-ai/schemastery';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { SkillGatewayService } from './gateway-service.js';
 import { buildGatewayToolResponse } from './tool-response.js';
+import { OrganizeController } from './organize-session.js';
 
 export const name = 'skill-gateway';
 export const inject = ['tools', 'systemPrompt', 'webServer'];
@@ -25,6 +26,8 @@ export const Config = z.object({
   dataDir: z.string().default(''),
   /** Optional fixed cwd. Empty means the harness process working directory. */
   cwd: z.string().default(''),
+  /** Agent preset id used for organize sessions. Empty means the deployment default preset. */
+  preset: z.string().default(''),
 });
 
 const GATEWAY_HINT = [
@@ -86,6 +89,7 @@ export function apply(ctx, config = {}) {
     dataDir: config.dataDir || null,
     logger: ctx.logger || console,
   });
+  const organize = new OrganizeController({ service, logger: ctx.logger || console, preset: config.preset || '' });
 
   let gatewayToolDisposer = null;
   let gatewayToolInstalled = false;
@@ -292,6 +296,8 @@ export function apply(ctx, config = {}) {
 
       if (req.method === 'GET' && url.pathname === '/skill-gateway/state') {
         const state = await service.state(cwd);
+        state.organize = organize.status(cwd);
+        state.organizeReport = (await service.getOrganizeReport(cwd)).report;
         return sendJson(res, 200, state);
       }
 
@@ -352,15 +358,15 @@ export function apply(ctx, config = {}) {
         return sendJson(res, 200, await service.previewSkillFiles(cwd, skillName));
       }
 
-      if (req.method === 'POST' && url.pathname === '/skill-gateway/scene-tree/preview') {
+      if (req.method === 'POST' && url.pathname === '/skill-gateway/upload/preview') {
         const body = await readBody(req);
         const scope = body.cwd || cwd;
         let item = body.item || (body.files ? { name: body.name, files: body.files } : null);
         if (Array.isArray(item)) item = { name: body.name, files: item };
         if (!item || !Array.isArray(item.files)) {
-          return sendJson(res, 400, { ok: false, error: 'preview 需要场景树文件夹 item.files。' });
+          return sendJson(res, 400, { ok: false, error: 'preview 需要上传文件夹 item.files。' });
         }
-        return sendJson(res, 200, await service.previewSceneTree(scope, item, body.options || {}));
+        return sendJson(res, 200, await service.previewUpload(scope, item, body.options || {}));
       }
 
       if (req.method === 'POST' && url.pathname === '/skill-gateway/scenes/skills') {
@@ -375,19 +381,57 @@ export function apply(ctx, config = {}) {
         return sendJson(res, 400, { ok: false, error: '未知 action。' });
       }
 
-      if (req.method === 'POST' && (url.pathname === '/skill-gateway/upload' || url.pathname === '/skill-gateway/scene-tree/upload')) {
+      if (req.method === 'POST' && url.pathname === '/skill-gateway/upload') {
         const body = await readBody(req);
         const scope = body.cwd || cwd;
         if (body.zipBase64 !== undefined || (body.item && body.item.zipBase64 !== undefined)) {
-          return sendJson(res, 400, { ok: false, error: 'ZIP 上传已移除，请上传场景树文件夹（item.files）。' });
+          return sendJson(res, 400, { ok: false, error: 'ZIP 上传已移除，请上传文件夹（item.files）。' });
         }
         let item = body.item || (body.files ? { name: body.name, files: body.files } : null);
         if (Array.isArray(item)) item = { name: body.name, files: item };
         if (!item || !Array.isArray(item.files)) {
-          return sendJson(res, 400, { ok: false, error: 'upload 需要场景树文件夹 item.files。' });
+          return sendJson(res, 400, { ok: false, error: 'upload 需要上传文件夹 item.files。' });
         }
-        const result = await service.uploadSceneTree(scope, item, body.options || {});
-        return sendJson(res, 200, result);
+        const result = await service.upload(scope, item, body.options || {});
+        if (!result.ok) return sendJson(res, 200, result);
+
+        // 上传成功后自动开启分类整理会话；互斥被占时上传本身已成功，仅提示。
+        const session = await organize.start(ctx, scope, 'classify', {
+          batch: { addedSkills: result.added, overwrittenSkills: result.overwritten },
+        });
+        return sendJson(res, 200, {
+          ...result,
+          session: session.ok
+            ? { started: true, sessionId: session.sessionId }
+            : { started: false, error: session.error },
+        });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/skill-gateway/organize/trigger') {
+        const body = await readBody(req);
+        const scope = body.cwd || cwd;
+        const mode = String(body.mode || '');
+        if (mode !== 'full' && mode !== 'detect') {
+          return sendJson(res, 400, { ok: false, error: 'organize trigger 的 mode 必须是 full（一键整理）或 detect（冲突检测）。' });
+        }
+        return sendJson(res, 200, await organize.start(ctx, scope, mode));
+      }
+
+      if (req.method === 'POST' && url.pathname === '/skill-gateway/organize/rollback') {
+        const body = await readBody(req);
+        const slot = String(body.slot || '');
+        if (slot !== 'upload' && slot !== 'organize') {
+          return sendJson(res, 400, { ok: false, error: 'rollback 的 slot 必须是 upload 或 organize。' });
+        }
+        return sendJson(res, 200, await service.rollback(body.cwd || cwd, slot));
+      }
+
+      if (req.method === 'GET' && url.pathname === '/skill-gateway/organize/report') {
+        return sendJson(res, 200, await service.getOrganizeReport(cwd));
+      }
+
+      if (req.method === 'GET' && url.pathname === '/skill-gateway/organize/status') {
+        return sendJson(res, 200, { ok: true, ...organize.status(cwd) });
       }
 
       if (req.method === 'POST' && url.pathname === '/skill-gateway/skills/delete') {
@@ -414,13 +458,16 @@ export function apply(ctx, config = {}) {
     { kind: 'exact', path: '/skill-gateway/stats', handler: route },
     { kind: 'exact', path: '/skill-gateway/toggle', handler: route },
     { kind: 'exact', path: '/skill-gateway/scenes', handler: route },
-    { kind: 'exact', path: '/skill-gateway/scene-tree/preview', handler: route },
+    { kind: 'exact', path: '/skill-gateway/upload/preview', handler: route },
     { kind: 'exact', path: '/skill-gateway/skills/files', handler: route },
     { kind: 'exact', path: '/skill-gateway/scenes/skills', handler: route },
     { kind: 'exact', path: '/skill-gateway/upload', handler: route },
-    { kind: 'exact', path: '/skill-gateway/scene-tree/upload', handler: route },
     { kind: 'exact', path: '/skill-gateway/skills/delete', handler: route },
     { kind: 'exact', path: '/skill-gateway/relocate', handler: route },
+    { kind: 'exact', path: '/skill-gateway/organize/trigger', handler: route },
+    { kind: 'exact', path: '/skill-gateway/organize/rollback', handler: route },
+    { kind: 'exact', path: '/skill-gateway/organize/report', handler: route },
+    { kind: 'exact', path: '/skill-gateway/organize/status', handler: route },
   ]) {
     webServer.register(spec);
   }

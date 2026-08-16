@@ -16,6 +16,7 @@ export {
   normalizeTags,
 } from './util.js';
 export {
+  MIN_SCENE_DESCRIPTION_LENGTH,
   attachSkill,
   collectDescendants,
   createCatalog,
@@ -23,9 +24,12 @@ export {
   deleteScene,
   deleteSkill,
   detachSkill,
+  diffCatalogs,
   getScene,
   getSkill,
+  moveScene,
   skillPaths,
+  unclassifiedSkills,
   updateScene,
   upsertSkill,
 } from './catalog.js';
@@ -33,13 +37,19 @@ export {
   browse,
   collectSubtree,
   find,
-  loadSkill,
   loadSkillFiles,
+  loadSkill,
   normalize,
   sceneMatchScore,
   scenePath,
   skillMatchScore,
   tokenize,
 } from './matching.js';
-export { importSceneTree, mergeSceneTree, parseFrontmatter, uploadSceneTree, validateUpload } from './upload.js';
+export {
+  applyUploadToCatalog,
+  collectUploadSkills,
+  parseFrontmatter,
+  validateUpload,
+} from './upload.js';
+export { applyOrganizeAction, ORGANIZE_ACTIONS } from './organize.js';
 export { aggregateUsage, recordUsage } from './usage.js';

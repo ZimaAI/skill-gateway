@@ -1,6 +1,11 @@
-import { SKILL_NAME_RE, clone, makeId } from './util.js';
+import { SKILL_NAME_RE, clone } from './util.js';
 
-/** Upload validation, scene-tree import, and SKILL.md frontmatter parsing. */
+/**
+ * Upload validation and skill-only collection. The upload path intentionally
+ * knows nothing about scenes: a selected folder is recursively scanned for
+ * skill folders (a folder holding a direct SKILL.md), and folder structure is
+ * otherwise ignored. Scene classification is an organize-session concern.
+ */
 
 /* ------------------------------------------------------------------------ */
 /* Upload validation                                                        */
@@ -143,79 +148,13 @@ export function validateUpload(input) {
 }
 
 /* ------------------------------------------------------------------------ */
-/* Scene-tree upload                                                        */
+/* Skill-only collection (upload preview and landing)                       */
 /* ------------------------------------------------------------------------ */
-
-function normalizeSceneTreeSource(input) {
-  const source = Array.isArray(input) ? { files: input } : input || {};
-  const name = String(source.name || '').trim().replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
-  return { source, name };
-}
-
-function normalizeSceneTreeFiles(source, options = {}) {
-  const reasons = [];
-  const files = [];
-
-  if (!Array.isArray(source.files)) {
-    reasons.push('files 必须是数组。');
-    return { files, reasons, root: '' };
-  }
-
-  for (const file of source.files) {
-    let raw = String((file && file.path) || '');
-    raw = raw.replace(/\\/g, '/').replace(/^\.\/+/, '');
-    raw = raw.replace(/^\/+/, '');
-    if (!raw) continue;
-
-    const isDir = raw.endsWith('/');
-    raw = raw.replace(/\/+$/, '');
-    if (!raw) continue;
-
-    const segments = raw.split('/').filter((part) => part && part !== '.');
-    if (!segments.length) continue;
-    if (segments.includes('..')) {
-      reasons.push(`路径包含非法片段：${raw}`);
-      continue;
-    }
-    files.push({ path: segments.join('/'), content: file.content, dir: isDir });
-  }
-
-  if (!files.length) {
-    reasons.push('场景树文件夹为空。');
-  }
-
-  const paths = files.map((file) => file.path);
-  const requestedRoot = String((options.rootName || options.rootPath || source.name || '')).trim()
-    .replace(/\\/g, '/')
-    .replace(/^\.\/+/, '')
-    .replace(/^\/+/, '')
-    .replace(/\/+$/, '');
-  let root = '';
-  if (requestedRoot) {
-    const wrapped = paths.some((filePath) => filePath === requestedRoot || filePath.startsWith(`${requestedRoot}/`));
-    if (wrapped) {
-      root = requestedRoot;
-      const outside = paths.filter((filePath) => filePath !== root && !filePath.startsWith(`${root}/`));
-      for (const filePath of outside) {
-        reasons.push(`路径不在所选根文件夹「${root}」内：${filePath}`);
-      }
-    }
-  }
-
-  const relativeFiles = files.map((file) => {
-    if (!root) return file;
-    if (file.path === root) return { ...file, path: '' };
-    if (file.path.startsWith(`${root}/`)) return { ...file, path: file.path.slice(root.length + 1) };
-    return file;
-  }).filter((file) => file.path !== '' || file.dir);
-
-  return { files: relativeFiles, reasons, root };
-}
 
 function ensureDir(dirs, dirPath) {
   let node = dirs.get(dirPath);
   if (node) return node;
-  node = { path: dirPath, files: new Map() };
+  node = new Map();
   dirs.set(dirPath, node);
   if (dirPath) {
     const parentPath = dirPath.includes('/') ? dirPath.slice(0, dirPath.lastIndexOf('/')) : '';
@@ -224,37 +163,8 @@ function ensureDir(dirs, dirPath) {
   return node;
 }
 
-function buildSceneTreeFileIndex(files) {
-  const dirs = new Map();
-  ensureDir(dirs, '');
-  const fileEntries = [];
-
-  for (const file of files) {
-    if (file.dir) {
-      if (file.path) ensureDir(dirs, file.path);
-      continue;
-    }
-    if (!file.path) continue;
-    const parentPath = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
-    const fileName = file.path.slice(parentPath ? parentPath.length + 1 : 0);
-    ensureDir(dirs, parentPath);
-    dirs.get(parentPath).files.set(fileName, file.content);
-    fileEntries.push({ dirPath: parentPath, name: fileName, content: file.content });
-  }
-
-  return { dirs, fileEntries };
-}
-
-function compareScenePaths(a, b) {
-  const aDepth = a ? a.split('/').filter(Boolean).length : 0;
-  const bDepth = b ? b.split('/').filter(Boolean).length : 0;
-  return aDepth - bDepth || a.localeCompare(b, 'en');
-}
-
-function skillParentSegments(skillDir) {
-  if (!skillDir) return [];
-  const segments = skillDir.split('/').filter(Boolean);
-  return segments.slice(0, -1);
+function parentPath(filePath) {
+  return filePath.includes('/') ? filePath.slice(0, filePath.lastIndexOf('/')) : '';
 }
 
 function isInsideSkillDir(dirPath, skillDir) {
@@ -262,247 +172,188 @@ function isInsideSkillDir(dirPath, skillDir) {
   return dirPath === skillDir || dirPath.startsWith(`${skillDir}/`);
 }
 
-function skillRelativePath(skillDir, dirPath, fileName) {
-  if (dirPath === skillDir) return fileName;
-  if (skillDir === '') return `${dirPath}/${fileName}`;
-  return `${dirPath.slice(skillDir.length + 1)}/${fileName}`;
+function skillRelativePath(skillDir, filePath) {
+  if (skillDir === '') return filePath;
+  if (filePath === skillDir) return '';
+  return filePath.slice(skillDir.length + 1);
 }
 
-function parseSceneTreeSkills(dirs, fileEntries, skillDirs) {
-  const reasons = [];
+function compareDepth(a, b) {
+  const aDepth = a ? a.split('/').filter(Boolean).length : 0;
+  const bDepth = b ? b.split('/').filter(Boolean).length : 0;
+  return aDepth - bDepth || a.localeCompare(b, 'en');
+}
+
+/**
+ * Collect every skill under an uploaded folder without any scene semantics.
+ *
+ * A folder is one skill exactly when SKILL.md sits directly inside it; the
+ * folder's whole subtree is that skill's asset files (a nested SKILL.md is an
+ * asset, not another skill). Folder structure produces no scenes and no
+ * attachments. Any other file is reported as ignored. Any invalid skill
+ * rejects the whole batch with per-item reasons.
+ *
+ * @param {{name?: string, files: Array<{path: string, content: string}>}|Array} input
+ * @param {{rootPath?: string, rootName?: string}} [options] optional wrapper folder to strip
+ */
+export function collectUploadSkills(input, options = {}) {
+  const source = Array.isArray(input) ? { files: input } : input || {};
+  const name = String(source.name || '').trim() || null;
+  const { files, reasons } = normalizeUploadPaths(source);
+  if (reasons.length) {
+    return { ok: false, reasons, name };
+  }
+  if (!files.length) {
+    return { ok: false, reasons: ['文件夹为空。'], name };
+  }
+
+  // Strip an optional wrapper folder when every path sits under it.
+  const requestedRoot = String((options.rootName || options.rootPath || '')).trim()
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '');
+  let normalized = files;
+  if (requestedRoot) {
+    const wrapped = normalized.some(
+      (file) => file.path === requestedRoot || file.path.startsWith(`${requestedRoot}/`),
+    );
+    if (wrapped) {
+      normalized = normalized.map((file) => ({
+        ...file,
+        path: file.path === requestedRoot ? '' : file.path.slice(requestedRoot.length + 1),
+      })).filter((file) => file.path);
+    }
+  }
+
+  // Directory index: dirPath -> Map(filename -> content).
+  const dirs = new Map();
+  ensureDir(dirs, '');
+  for (const file of normalized) {
+    if (!file.path) continue;
+    const parent = parentPath(file.path);
+    const fileName = file.path.slice(parent ? parent.length + 1 : 0);
+    ensureDir(dirs, parent);
+    dirs.get(parent).set(fileName, file.content);
+  }
+
+  // Skill dirs: a dir with a direct SKILL.md that is not inside another skill
+  // dir (classification stops at the first skill level).
+  const skillDirs = [];
+  for (const dirPath of [...dirs.keys()].sort(compareDepth)) {
+    if (skillDirs.some((skillDir) => isInsideSkillDir(dirPath, skillDir))) continue;
+    if (dirs.get(dirPath).has('SKILL.md')) skillDirs.push(dirPath);
+  }
+
+  const ignoredFiles = normalized
+    .filter((file) => file.path && !skillDirs.some((skillDir) => isInsideSkillDir(parentPath(file.path), skillDir)))
+    .map((file) => file.path)
+    .sort();
+
+  const skillReasons = [];
   const skills = [];
-  const sortedSkillDirs = [...skillDirs].sort(compareScenePaths);
-
-  for (const skillDir of sortedSkillDirs) {
+  for (const skillDir of skillDirs) {
     const label = skillDir ? `技能文件夹「${skillDir}」` : '根技能文件夹';
-    const markdown = dirs.get(skillDir).files.get('SKILL.md');
+    const markdown = dirs.get(skillDir).get('SKILL.md');
     const parsed = parseFrontmatter(markdown);
-
     if (!parsed.ok) {
-      reasons.push(`${label}：${parsed.reasons.join('；')}`);
+      skillReasons.push(`${label}：${parsed.reasons.join('；')}`);
       continue;
     }
 
-    const name = String(parsed.fields.name || '').trim();
+    const skillName = String(parsed.fields.name || '').trim();
     const description = String(parsed.fields.description || '').trim();
-    if (!name) {
-      reasons.push(`${label}：frontmatter 缺少 name。`);
+    if (!skillName) {
+      skillReasons.push(`${label}：frontmatter 缺少 name。`);
       continue;
     }
-    if (!SKILL_NAME_RE.test(name)) {
-      reasons.push(`${label}：name 不符合 [a-z0-9][a-z0-9-]*（小写字母、数字、连字符，且不能以连字符开头）。`);
+    if (!SKILL_NAME_RE.test(skillName)) {
+      skillReasons.push(`${label}：name 不符合 [a-z0-9][a-z0-9-]*（小写字母、数字、连字符，且不能以连字符开头）。`);
       continue;
     }
     if (!description) {
-      reasons.push(`${label}：frontmatter 缺少非空 description。`);
+      skillReasons.push(`${label}：frontmatter 缺少非空 description。`);
       continue;
     }
 
     const renderedFiles = {};
     let invalidContent = false;
-    for (const entry of fileEntries) {
-      if (!isInsideSkillDir(entry.dirPath, skillDir)) continue;
-      const rel = skillRelativePath(skillDir, entry.dirPath, entry.name);
-      if (typeof entry.content !== 'string') {
-        reasons.push(`${label}/${rel} 的内容必须是字符串。`);
+    for (const file of normalized) {
+      if (!file.path || !isInsideSkillDir(parentPath(file.path), skillDir)) continue;
+      const rel = skillRelativePath(skillDir, file.path);
+      if (typeof file.content !== 'string') {
+        skillReasons.push(`${label}/${rel} 的内容必须是字符串。`);
         invalidContent = true;
         continue;
       }
-      renderedFiles[rel] = entry.content;
+      renderedFiles[rel] = file.content;
     }
-
     if (invalidContent) continue;
-    skills.push({
-      folder: skillDir,
-      parentPath: skillParentSegments(skillDir),
-      name,
-      description,
-      files: renderedFiles,
-    });
+    skills.push({ name: skillName, description, files: renderedFiles });
   }
 
-  return { reasons, skills };
+  if (skillReasons.length) {
+    return { ok: false, reasons: skillReasons, name };
+  }
+  if (!skills.length) {
+    return { ok: false, reasons: ['文件夹中没有找到任何技能（技能 = 含直接 SKILL.md 的文件夹）。'], name };
+  }
+
+  const fileCount = skills.reduce((total, skill) => total + Object.keys(skill.files).length, 0);
+  return {
+    ok: true,
+    name,
+    skills,
+    ignoredFiles,
+    fileCount,
+    skillCount: skills.length,
+  };
 }
 
 /**
- * Import an uploaded scene-tree folder into an existing catalog.
+ * Land collected skills into a catalog without touching the scene tree.
  *
- * The selected folder is treated as the scene-tree root. Every folder below
- * it is scanned recursively:
- * - a folder without a direct SKILL.md is a scene (the selected root maps to
- *   the existing catalog root);
- * - a folder with a direct SKILL.md is one skill and its whole subtree is
- *   imported as that skill's files (nested SKILL.md files are assets, not
- *   additional skills).
- *
- * Overlapping paths reuse existing scenes by name; same-name skills are
- * overwritten in place, preserving createdAt and existing scene attachments.
+ * Same-name skills are overwritten in place, preserving `createdAt` and any
+ * existing scene attachments. Uploaded skills are unclassified: they are not
+ * attached to any scene and gateway discovery ignores them.
  *
  * @param {object} catalog existing catalog (not mutated)
- * @param {{name?: string, files: Array<{path: string, content: string}>}|Array} input
- * @param {{now?: number|(() => number), random?: () => number}} [options]
+ * @param {Array<{name: string, description: string, files: object}>} skills
+ * @param {number|(() => number)} [now]
  */
-export function importSceneTree(catalog, input, options = {}) {
-  if (!catalog || !catalog.scenes || !catalog.skills || !catalog.rootSceneId || !catalog.scenes[catalog.rootSceneId]) {
-    return { ok: false, error: '目录无效。' };
-  }
-
-  const { source, name } = normalizeSceneTreeSource(input);
-  const normalized = normalizeSceneTreeFiles(source, {
-    rootName: options.rootName,
-    rootPath: options.rootPath,
-  });
-  if (normalized.reasons.length) {
-    return { ok: false, reasons: normalized.reasons, name };
-  }
-
-  const { dirs, fileEntries } = buildSceneTreeFileIndex(normalized.files);
-
-  // A folder is a skill only when SKILL.md sits directly inside it. Descendants
-  // of a skill folder are assets, so classification stops at the first skill.
-  const skillDirs = new Set();
-  for (const dirPath of [...dirs.keys()].sort(compareScenePaths)) {
-    if ([...skillDirs].some((skillDir) => isInsideSkillDir(dirPath, skillDir))) continue;
-    if (dirs.get(dirPath).files.has('SKILL.md')) skillDirs.add(dirPath);
-  }
-
-  const sceneDirs = [...dirs.keys()]
-    .filter((dirPath) => {
-      if (skillDirs.has(dirPath)) return false;
-      return ![...skillDirs].some((skillDir) => isInsideSkillDir(dirPath, skillDir));
-    })
-    .sort(compareScenePaths);
-
-  const nonRootScenes = sceneDirs.filter((dirPath) => dirPath !== '');
-  if (!skillDirs.size && !nonRootScenes.length) {
-    return { ok: false, reasons: ['场景树中没有可导入的场景或技能。'], name };
-  }
-
-  const ignoredFiles = fileEntries
-    .filter((entry) => sceneDirs.includes(entry.dirPath))
-    .map((entry) => (entry.dirPath ? `${entry.dirPath}/${entry.name}` : entry.name))
-    .sort();
-
-  const parsed = parseSceneTreeSkills(dirs, fileEntries, skillDirs);
-  if (parsed.reasons.length) {
-    return { ok: false, reasons: parsed.reasons, name };
-  }
+export function applyUploadToCatalog(catalog, skills, now = Date.now()) {
+  if (!catalog || !catalog.scenes || !catalog.skills) return { ok: false, error: '目录无效。' };
+  if (!Array.isArray(skills)) return { ok: false, error: 'skills 必须是数组。' };
 
   const next = clone(catalog);
-  const timestamp = options.now === undefined
-    ? Date.now()
-    : (typeof options.now === 'function' ? options.now() : options.now);
-  const scenesCreated = [];
-  const createdSceneIds = new Set();
-  const scenesReused = new Set();
-  let mergeError = null;
+  const timestamp = typeof now === 'function' ? now() : now;
+  const added = [];
+  const overwritten = [];
 
-  const ensureScenePath = (segments) => {
-    let parent = next.scenes[next.rootSceneId];
-    for (let index = 0; index < segments.length; index += 1) {
-      const segment = String(segments[index] || '').trim();
-      if (!segment) {
-        mergeError = `上传路径包含空场景名称：${segments.join(' / ')}`;
-        return null;
-      }
-      const childId = (parent.children || []).find((id) => next.scenes[id] && next.scenes[id].name === segment);
-      if (childId) {
-        if (!createdSceneIds.has(childId)) scenesReused.add(childId);
-        parent = next.scenes[childId];
-        continue;
-      }
-
-      const duplicate = Object.values(next.scenes).find((scene) => scene.name === segment);
-      if (duplicate) {
-        const pathText = segments.slice(0, index + 1).join(' / ');
-        mergeError = `场景名称已存在但不在上传路径中：${segment}（上传路径 ${pathText}，现有场景 ${duplicate.id}）。`;
-        return null;
-      }
-
-      let id;
-      do {
-        id = makeId('scene', options.random);
-      } while (next.scenes[id]);
-
-      const scene = {
-        id,
-        name: segment,
-        description: '',
-        tags: [],
-        parentId: parent.id,
-        children: [],
-        skills: [],
-      };
-      next.scenes[id] = scene;
-      if (!parent.children) parent.children = [];
-      parent.children.push(id);
-      scenesCreated.push(id);
-      createdSceneIds.add(id);
-      parent = scene;
+  for (const skill of skills) {
+    const name = String(skill && skill.name || '').trim();
+    if (!SKILL_NAME_RE.test(name)) {
+      return { ok: false, error: `技能 name 不符合 [a-z0-9][a-z0-9-]*：${name}` };
     }
-    return parent;
-  };
-
-  // Materialize every non-root scene first so scenes that contain only
-  // ignored/empty folders are still represented in the catalog.
-  for (const dirPath of nonRootScenes) {
-    const targetScene = ensureScenePath(dirPath.split('/').filter(Boolean));
-    if (!targetScene) {
-      return { ok: false, reasons: [mergeError], name };
-    }
-  }
-
-  const originalSkillNames = new Set(Object.keys(catalog.skills || {}));
-  const importedSkillNames = new Set();
-  const updatedSkillNames = new Set();
-  const mergedSkills = new Map();
-
-  for (const skill of parsed.skills) {
-    const targetScene = ensureScenePath(skill.parentPath);
-    if (!targetScene) {
-      return { ok: false, reasons: [mergeError], name };
+    const description = String(skill && skill.description || '').trim();
+    if (!description) {
+      return { ok: false, error: `技能 ${name} 的 description 不能为空。` };
     }
 
-    importedSkillNames.add(skill.name);
-    const existing = next.skills[skill.name];
-    if (existing) updatedSkillNames.add(skill.name);
-    next.skills[skill.name] = {
-      name: skill.name,
-      description: skill.description,
+    const existing = next.skills[name];
+    if (existing) overwritten.push(name);
+    else added.push(name);
+    next.skills[name] = {
+      name,
+      description,
       createdAt: existing ? existing.createdAt : timestamp,
       updatedAt: timestamp,
     };
-    if (!targetScene.skills) targetScene.skills = [];
-    if (!targetScene.skills.includes(skill.name)) targetScene.skills.push(skill.name);
-    mergedSkills.set(skill.name, skill);
   }
-
-  const skills = [...mergedSkills.values()].map((skill) => ({
-    name: skill.name,
-    description: skill.description,
-    files: skill.files,
-  }));
-  const fileCount = skills.reduce((total, skill) => total + Object.keys(skill.files).length, 0);
 
   return {
     ok: true,
     catalog: next,
-    name,
-    scenesCreated,
-    scenesReused: [...scenesReused].sort(),
-    sceneCounts: { created: scenesCreated.length, reused: scenesReused.size },
-    skills,
-    skillNames: [...importedSkillNames].sort(),
-    skillsImported: skills.length,
-    skillsCreated: [...importedSkillNames].filter((skillName) => !originalSkillNames.has(skillName)).length,
-    skillsUpdated: [...updatedSkillNames].filter((skillName) => originalSkillNames.has(skillName)).length,
-    fileCount,
-    ignoredFiles,
+    added: [...added].sort(),
+    overwritten: [...overwritten].sort(),
   };
 }
-
-/** Alias for callers that prefer upload terminology. */
-export const uploadSceneTree = importSceneTree;
-
-/** Alias for callers that prefer merge terminology. */
-export const mergeSceneTree = importSceneTree;

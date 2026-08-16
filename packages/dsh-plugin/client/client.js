@@ -1390,7 +1390,7 @@ details.sg-card[open] > summary {
 }
 
 /* ------------------------------------------------------------------------ */
-/* 上传场景树                                                                */
+/* 上传                                                                      */
 /* ------------------------------------------------------------------------ */
 
 .sg-dropzone {
@@ -1745,6 +1745,29 @@ details.sg-card[open] > summary {
 /* Skill Gateway 覆盖：弹窗与 Toast 必须浮在侧边栏之上 */
 .sg-modal-backdrop { z-index: 1400; }
 .sg-toast-root { z-index: 1500; }
+
+/* ------------------------------------------------------------------------ */
+/* 整理与回滚：入口按钮、报告卡片、未分类分组                                  */
+.sg-organize-actions { display: flex; gap: 8px; align-items: center; }
+.sg-organize-actions .sg-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.sg-report-card { margin-top: 16px; }
+.sg-report-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.sg-report-title { font-size: 13px; font-weight: 600; color: var(--sg-ink-1); }
+.sg-report-time { font-size: 12px; color: var(--sg-ink-3); margin-left: auto; }
+.sg-report-section { margin: 10px 0 0; }
+.sg-report-section-title { font-size: 12px; font-weight: 600; color: var(--sg-ink-2); margin-bottom: 6px; }
+.sg-report-list { list-style: none; margin: 0; padding: 0; }
+.sg-report-list li { font-size: 12.5px; line-height: 1.6; color: var(--sg-ink-1); padding: 4px 8px; border-radius: 6px; background: var(--sg-bg-hover); margin-bottom: 4px; }
+.sg-report-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sg-report-chips .sg-path-chip { font-size: 12px; }
+.sg-report-foot { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.sg-unclassified-card { margin-top: 12px; }
+.sg-unclassified-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.sg-unclassified-row:hover { background: var(--sg-bg-hover); }
+.sg-unclassified-main { min-width: 0; flex: 1; }
+.sg-upload-result { padding: 4px 0 0; }
+.sg-upload-result-title { font-size: 14px; font-weight: 600; margin: 10px 0 4px; color: var(--sg-ink-1); }
+.sg-upload-result-actions { display: flex; gap: 8px; margin-top: 10px; }
 `;
 
     if (typeof document !== 'undefined') {
@@ -2204,12 +2227,12 @@ details.sg-card[open] > summary {
             h('div', { className: 'sg-empty-icon' }, h(Icon, { name: 'skill' })),
             h('h3', { className: 'sg-empty-title' }, query ? '没有匹配的技能' : '目录中还没有技能'),
             h('p', { className: 'sg-empty-desc' },
-              query ? '换个关键词试试。' : '上传场景树后，含 SKILL.md 的文件夹会自动识别为技能。'),
+              query ? '换个关键词试试。' : '上传文件夹后，含 SKILL.md 的文件夹会自动识别为技能。'),
             h('div', { className: 'sg-empty-actions' },
               query
                 ? h('button', { className: 'sg-btn sg-btn-secondary', type: 'button', onClick: onClearSearch }, '清除搜索')
                 : null,
-              h('button', { className: 'sg-btn sg-btn-ghost', type: 'button', onClick: onUpload }, '上传场景树'))));
+              h('button', { className: 'sg-btn sg-btn-ghost', type: 'button', onClick: onUpload }, '上传'))));
       }
 
       return h('div', { className: 'sg-card' },
@@ -2238,7 +2261,7 @@ details.sg-card[open] > summary {
                   h('span', { className: 'sg-skill-name sg-mono' }, skill.name),
                   paths.length
                     ? h('span', { className: 'sg-badge sg-primary' }, `${paths.length} 个挂载点`)
-                    : h('span', { className: 'sg-badge sg-warning' }, '未挂载')),
+                    : h('span', { className: 'sg-badge sg-warning' }, '未分类')),
                 h('div', { className: 'sg-skill-desc' }, skill.description || ''),
                 paths.length
                   ? h('div', { className: 'sg-skill-scenes' },
@@ -2275,6 +2298,148 @@ details.sg-card[open] > summary {
           })));
     }
 
+    function UnclassifiedCard({ catalog, onSkillDetail, onAttachSkill }) {
+      const skills = Object.values(catalog.skills || {})
+        .filter((skill) => !scenePathsForSkill(catalog, skill.name).length)
+        .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0) || a.name.localeCompare(b.name, 'en'));
+
+      if (!skills.length) return null;
+      return h('div', { className: 'sg-card sg-unclassified-card' },
+        h('div', { className: 'sg-table-head' },
+          h('span', { className: 'sg-table-title' }, '未分类技能'),
+          h('span', { className: 'sg-table-count' }, `${skills.length} 个 · 尚未挂到任何场景，网关发现不返回；可手动挂载或触发「一键整理」`)),
+        h('div', { className: 'sg-skill-list' },
+          skills.map((skill) => h('div', {
+            className: 'sg-skill-list-item',
+            key: skill.name,
+            tabIndex: 0,
+            role: 'button',
+            onClick: () => onSkillDetail(skill.name),
+            onKeyDown: (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onSkillDetail(skill.name);
+              }
+            },
+          },
+            h('span', { className: 'sg-tree-icon' }, h(Icon, { name: 'skill' })),
+            h('div', { className: 'sg-skill-list-main' },
+              h('div', { className: 'sg-skill-name-line' },
+                h('span', { className: 'sg-skill-name sg-mono' }, skill.name),
+                h('span', { className: 'sg-badge sg-warning' }, '未分类')),
+              h('div', { className: 'sg-skill-desc' }, skill.description || '')),
+            h('div', { className: 'sg-skill-list-actions' },
+              h('button', {
+                className: 'sg-icon-btn',
+                type: 'button',
+                title: '挂载到场景',
+                onClick: (event) => {
+                  event.stopPropagation();
+                  onAttachSkill(skill.name);
+                },
+              }, h(Icon, { name: 'link' })),
+              h('button', {
+                className: 'sg-icon-btn',
+                type: 'button',
+                title: '查看详情与文件',
+                onClick: (event) => {
+                  event.stopPropagation();
+                  onSkillDetail(skill.name);
+                },
+              }, h(Icon, { name: 'eye' })))))));
+    }
+
+    const ORGANIZE_MODE_LABELS = { classify: '技能分类', full: '一键整理', detect: '冲突检测' };
+
+    function OrganizeSection({ state, cwd, onChanged, notify, setModal }) {
+      const { organize } = state;
+      const running = organize && organize.running;
+      const report = state.organizeReport;
+      const snapshots = state.snapshots || {};
+
+      const openRollback = (slot) => {
+        setModal({ type: 'rollback-confirm', payload: { slot } });
+      };
+
+      const renderChanges = (changes) => {
+        if (!changes) return null;
+        const items = [];
+        if (changes.scenesCreated && changes.scenesCreated.length) items.push(`新建场景 ${changes.scenesCreated.length} 个（${changes.scenesCreated.map((scene) => scene.name).join('、')}）`);
+        if (changes.scenesDeleted && changes.scenesDeleted.length) items.push(`删除场景 ${changes.scenesDeleted.length} 个（${changes.scenesDeleted.map((scene) => scene.name).join('、')}）`);
+        if (changes.scenesRenamed && changes.scenesRenamed.length) items.push(`场景改名 ${changes.scenesRenamed.length} 个`);
+        if (changes.scenesChanged && changes.scenesChanged.length) items.push(`更新场景 ${changes.scenesChanged.length} 个（描述/标签/位置）`);
+        if (changes.addedSkills && changes.addedSkills.length) items.push(`技能入库 ${changes.addedSkills.length} 个`);
+        if (changes.overwrittenSkills && changes.overwrittenSkills.length) items.push(`技能覆盖 ${changes.overwrittenSkills.length} 个`);
+        if (changes.removedSkills && changes.removedSkills.length) items.push(`技能删除 ${changes.removedSkills.length} 个`);
+        if (changes.attachChanges && changes.attachChanges.length) {
+          const attached = changes.attachChanges.filter((entry) => entry.kind === 'attach').length;
+          const detached = changes.attachChanges.filter((entry) => entry.kind === 'detach').length;
+          items.push(`挂载变动 ${attached + detached} 处（挂载 ${attached}、解链 ${detached}）`);
+        }
+        return items;
+      };
+
+      return h('div', { className: 'sg-card sg-report-card' },
+        h('div', { className: 'sg-report-head' },
+          h('span', { className: 'sg-report-title' }, '整理报告与回滚'),
+          running
+            ? h('span', { className: 'sg-badge sg-primary' }, `整理会话进行中：${ORGANIZE_MODE_LABELS[organize.mode] || organize.mode || ''}`)
+            : null),
+        !report
+          ? h('div', { className: 'sg-empty', style: { padding: '12px 0 4px' } },
+              h('h3', { className: 'sg-empty-title', style: { fontSize: 13 } }, '还没有整理报告'),
+              h('p', { className: 'sg-empty-desc' },
+                running ? '整理会话完成后会在这里展示改动摘要与冲突清单。' : '上传后会自动开启技能分类会话；也可手动触发「一键整理」或「冲突检测」。'))
+          : h('div', null,
+              h('div', { className: 'sg-report-section' },
+                h('div', { className: 'sg-report-section-title' },
+                  `最近报告 · ${ORGANIZE_MODE_LABELS[report.mode] || report.mode || '整理'}${report.startedAt ? ` · ${fmtDateTime(report.startedAt)}` : ''}${report.sessionId ? ` · ${report.sessionId}` : ''}`),
+                (() => {
+                  const items = renderChanges(report.changes);
+                  if (!items || !items.length) {
+                    return h('ul', { className: 'sg-report-list' },
+                      h('li', { key: 'none' }, report.mode === 'detect' ? '检测为只读，未改动场景树。' : '本次整理没有产生改动。'));
+                  }
+                  return h('ul', { className: 'sg-report-list' },
+                    items.map((item, index) => h('li', { key: index }, item)));
+                })()),
+              (report.conflicts && report.conflicts.length)
+                ? h('div', { className: 'sg-report-section' },
+                    h('div', { className: 'sg-report-section-title' }, '冲突'),
+                    h('ul', { className: 'sg-report-list' },
+                      report.conflicts.map((item, index) => h('li', { key: index }, item))))
+                : null,
+              (report.duplicates && report.duplicates.length)
+                ? h('div', { className: 'sg-report-section' },
+                    h('div', { className: 'sg-report-section-title' }, '重复技能'),
+                    h('ul', { className: 'sg-report-list' },
+                      report.duplicates.map((item, index) => h('li', { key: index }, item))))
+                : null,
+              (report.overwrites && report.overwrites.length)
+                ? h('div', { className: 'sg-report-section' },
+                    h('div', { className: 'sg-report-section-title' }, '同名覆盖'),
+                    h('div', { className: 'sg-report-chips' },
+                      report.overwrites.map((name) => h('span', { className: 'sg-path-chip', key: name }, name))))
+                : null),
+        h('div', { className: 'sg-report-foot' },
+          h('button', {
+            className: 'sg-btn sg-btn-sm sg-btn-ghost',
+            type: 'button',
+            disabled: !snapshots.upload,
+            title: snapshots.upload ? '回滚最近一次上传：还原整棵树、删除本批新增技能文件、恢复被覆盖的原文件' : '还没有可回滚的上传快照',
+            onClick: () => openRollback('upload'),
+          }, '回滚上传'),
+          h('button', {
+            className: 'sg-btn sg-btn-sm sg-btn-ghost',
+            type: 'button',
+            disabled: !snapshots.organize,
+            title: snapshots.organize ? '回滚最近一次整理：仅还原场景树，不触碰技能文件' : '还没有可回滚的整理快照',
+            onClick: () => openRollback('organize'),
+          }, '回滚整理'),
+          h('span', { style: { fontSize: 12, color: 'var(--sg-ink-3)', alignSelf: 'center' } },
+            '每个槽位只保留最近一份快照；回滚将把整棵树还原到该操作之前。')));
+    }
+
     function LocationCard({ location, onRelocate }) {
       let displayPath = location && location.dataDir ? location.dataDir : '.skillgate/';
       if (location && location.cwd && location.dataDir && location.dataDir.startsWith(location.cwd)) {
@@ -2291,7 +2456,7 @@ details.sg-card[open] > summary {
     }
 
     function CatalogTab(props) {
-      const { state, cwd, onChanged, notify, setModal } = props;
+      const { state, cwd, onChanged, notify, setModal, onOpenSession } = props;
       const catalog = state.catalog;
       const [view, setView] = useState('tree');
       const [query, setQuery] = useState('');
@@ -2300,6 +2465,7 @@ details.sg-card[open] > summary {
       const [busyAction, setBusyAction] = useState(null);
 
       const selectedScene = catalog.scenes[selectedId] || catalog.scenes[catalog.rootSceneId];
+      const organizeRunning = state.organize && state.organize.running;
 
       useEffect(() => {
         if (!catalog.scenes[selectedId]) setSelectedId(catalog.rootSceneId);
@@ -2308,6 +2474,26 @@ details.sg-card[open] > summary {
       const refreshAfter = useCallback(async () => {
         await onChanged();
       }, [onChanged]);
+
+      const openOrganizeSession = (sessionId) => {
+        if (onOpenSession && sessionId) onOpenSession(sessionId);
+      };
+
+      const triggerOrganize = async (mode) => {
+        if (organizeRunning) return;
+        try {
+          const result = await api('POST', withCwd('/skill-gateway/organize/trigger', cwd), { mode, cwd });
+          if (!result.ok) {
+            notify(result.error || '触发失败。', 'danger', 6000);
+            return;
+          }
+          notify(mode === 'detect' ? '冲突检测会话已开启。' : '一键整理会话已开启。', 'success', 6000);
+          if (result.sessionId) openOrganizeSession(result.sessionId);
+          await refreshAfter();
+        } catch (err) {
+          notify(err.message, 'danger');
+        }
+      };
 
       const detachSkill = async (sceneId, skillName) => {
         if (busyAction) return;
@@ -2319,7 +2505,7 @@ details.sg-card[open] > summary {
             skillName,
             cwd,
           });
-          notify(result.ok ? `已从「${catalog.scenes[sceneId].name}」解链 ${skillName}` : (result.error || '解链失败'), result.ok ? 'success' : 'danger');
+          notify(result.ok ? `已从「${catalog.scenes[sceneId].name}」解链 ${skillName}，回到未分类。` : (result.error || '解链失败'), result.ok ? 'success' : 'danger');
           if (result.ok) await refreshAfter();
         } catch (error) {
           notify(error.message, 'danger');
@@ -2341,7 +2527,21 @@ details.sg-card[open] > summary {
               className: 'sg-btn sg-btn-sm sg-btn-ghost',
               type: 'button',
               onClick: () => setModal({ type: 'upload', payload: null }),
-            }, h(Icon, { name: 'upload' }), '上传场景树'),
+            }, h(Icon, { name: 'upload' }), '上传'),
+            h('button', {
+              className: 'sg-btn sg-btn-sm sg-btn-ghost',
+              type: 'button',
+              disabled: organizeRunning,
+              title: organizeRunning ? '整理会话进行中，请等待完成' : '让 Agent 整理整棵场景树（可回滚）',
+              onClick: () => triggerOrganize('full'),
+            }, h(Icon, { name: 'layers' }), '一键整理'),
+            h('button', {
+              className: 'sg-btn sg-btn-sm sg-btn-ghost',
+              type: 'button',
+              disabled: organizeRunning,
+              title: organizeRunning ? '整理会话进行中，请等待完成' : '只读检测冲突与重复技能',
+              onClick: () => triggerOrganize('detect'),
+            }, h(Icon, { name: 'search' }), '冲突检测'),
             h('button', {
               className: 'sg-btn sg-btn-sm sg-btn-secondary',
               type: 'button',
@@ -2385,7 +2585,7 @@ details.sg-card[open] > summary {
                   h('div', { className: 'sg-empty' },
                     h('div', { className: 'sg-empty-icon' }, h(Icon, { name: 'search' })),
                     h('h3', { className: 'sg-empty-title' }, '没有匹配的场景或技能'),
-                    h('p', { className: 'sg-empty-desc' }, '换个关键词，或先创建场景、上传场景树。'),
+                    h('p', { className: 'sg-empty-desc' }, '换个关键词，或先创建场景、上传技能。'),
                     h('div', { className: 'sg-empty-actions' },
                       h('button', {
                         className: 'sg-btn sg-btn-secondary',
@@ -2429,7 +2629,14 @@ details.sg-card[open] > summary {
                     onManageSkills: (sceneId) => setModal({ type: 'skill-picker', payload: { sceneId } }),
                     onSkillDetail: (skillName) => setModal({ type: 'skill-detail', payload: { skillName } }),
                     onDetachSkill: detachSkill,
-                  })))
+                  })),
+              !searchText
+                ? h(UnclassifiedCard, {
+                    catalog,
+                    onSkillDetail: (skillName) => setModal({ type: 'skill-detail', payload: { skillName } }),
+                    onAttachSkill: (skillName) => setModal({ type: 'attach-skill', payload: { skillName } }),
+                  })
+                : null)
           : h(SkillListCard, {
               catalog,
               query: searchText,
@@ -2439,6 +2646,13 @@ details.sg-card[open] > summary {
               onAttachSkill: (skillName) => setModal({ type: 'attach-skill', payload: { skillName } }),
               onDeleteSkill: (skillName) => setModal({ type: 'delete-skill', payload: { skillName } }),
             }),
+        h(OrganizeSection, {
+          state,
+          cwd,
+          onChanged: refreshAfter,
+          notify,
+          setModal,
+        }),
         h(LocationCard, {
           location: state.location,
           onRelocate: () => setModal({ type: 'relocate', payload: null }),
@@ -3235,7 +3449,7 @@ details.sg-card[open] > summary {
 
     function sampleSuccessUploadItem() {
       return {
-        name: 'scene-tree-ops-sample',
+        name: 'skills-sample',
         files: [
           {
             path: '运维与可靠性/incident-review/SKILL.md',
@@ -3257,17 +3471,21 @@ details.sg-card[open] > summary {
             path: '后端开发/sql-review/checklist.sql',
             content: '-- 检查：过滤条件、JOIN、排序、分页\nSELECT 1;\n',
           },
+          {
+            path: '说明.md',
+            content: '# 散文件\n\n技能文件夹之外的文件不会导入。',
+          },
         ],
       };
     }
 
     function sampleFailureUploadItem() {
       return {
-        name: 'scene-tree-invalid-sample',
+        name: 'skills-invalid-sample',
         files: [
           { path: 'frontend-api/SKILL.md', content: '---\nname: frontend-api\n---\n\n缺少 description。' },
-          { path: '新场景/Bad_Name/SKILL.md', content: '---\nname: Bad_Name\ndescription: name 含大写和下划线，不符合约束。\n---\n' },
-          { path: '新场景/no-frontmatter/SKILL.md', content: '# 没有 frontmatter\n' },
+          { path: '新技能/Bad_Name/SKILL.md', content: '---\nname: Bad_Name\ndescription: name 含大写和下划线，不符合约束。\n---\n' },
+          { path: '新技能/no-frontmatter/SKILL.md', content: '# 没有 frontmatter\n' },
         ],
       };
     }
@@ -3294,20 +3512,22 @@ details.sg-card[open] > summary {
       return { name: rootName || 'selected-folder', files };
     }
 
-    function UploadModal({ modal, state, cwd, onClose, onSaved, notify }) {
+    function UploadModal({ modal, state, cwd, onClose, onSaved, notify, onOpenSession }) {
       const inputRef = useRef(null);
       const [pending, setPending] = useState(null);
       const [busy, setBusy] = useState(false);
       const [reading, setReading] = useState(false);
+      const [result, setResult] = useState(null);
 
       const chooseFolder = () => {
         if (inputRef.current) inputRef.current.click();
       };
 
       const setPendingUpload = useCallback(async (item) => {
+        setResult(null);
         setPending({ item, preview: null });
         try {
-          const preview = await api('POST', withCwd('/skill-gateway/scene-tree/preview', cwd), { item, cwd });
+          const preview = await api('POST', withCwd('/skill-gateway/upload/preview', cwd), { item, cwd });
           setPending({ item, preview });
         } catch (err) {
           setPending({ item, preview: { ok: false, reasons: [err.message], name: item.name } });
@@ -3319,7 +3539,7 @@ details.sg-card[open] > summary {
         const fileList = [...(input.files || [])];
         input.value = '';
         if (!fileList.length) {
-          setPending({ item: { name: '场景树文件夹', files: [] }, preview: { ok: false, reasons: ['文件夹为空。'] } });
+          setPending({ item: { name: '技能文件夹', files: [] }, preview: { ok: false, reasons: ['文件夹为空。'] } });
           return;
         }
         setReading(true);
@@ -3331,12 +3551,12 @@ details.sg-card[open] > summary {
             if (first) roots.add(first);
           }
           if (roots.size > 1) {
-            setPending({ item: { name: '场景树文件夹', files: [] }, preview: { ok: false, reasons: ['一次只能选择一个场景树文件夹。'] } });
+            setPending({ item: { name: '技能文件夹', files: [] }, preview: { ok: false, reasons: ['一次只能选择一个文件夹。'] } });
             return;
           }
           await setPendingUpload(await filesToUploadItem(fileList));
         } catch (err) {
-          setPending({ item: { name: '场景树文件夹', files: [] }, preview: { ok: false, reasons: [err.message] } });
+          setPending({ item: { name: '技能文件夹', files: [] }, preview: { ok: false, reasons: [err.message] } });
         } finally {
           setReading(false);
         }
@@ -3346,14 +3566,18 @@ details.sg-card[open] > summary {
         if (!pending || !pending.preview || !pending.preview.ok || busy) return;
         setBusy(true);
         try {
-          const result = await api('POST', withCwd('/skill-gateway/scene-tree/upload', cwd), { item: pending.item, cwd });
-          if (!result.ok) {
-            notify(result.reasons ? result.reasons[0] : '导入失败。', 'danger');
+          const uploadResult = await api('POST', withCwd('/skill-gateway/upload', cwd), { item: pending.item, cwd });
+          if (!uploadResult.ok) {
+            notify(uploadResult.reasons ? uploadResult.reasons[0] : '上传失败。', 'danger');
             return;
           }
-          const counts = result.sceneCounts || {};
-          notify(`导入完成：新建场景 ${counts.created || 0} 个，复用 ${counts.reused || 0} 个；技能新建 ${result.skillsCreated || 0} 个，更新 ${result.skillsUpdated || 0} 个。`, 'success', 6000);
-          onClose();
+          setResult(uploadResult);
+          const session = uploadResult.session || {};
+          if (session.started) {
+            notify(`上传完成：新增 ${uploadResult.added.length} 个技能，覆盖 ${uploadResult.overwritten.length} 个。整理会话已开启。`, 'success', 6000);
+          } else {
+            notify(`上传完成：新增 ${uploadResult.added.length} 个技能，覆盖 ${uploadResult.overwritten.length} 个。${session.error || '整理会话未能自动开启。'}`, 'warning', 6000);
+          }
           await onSaved();
         } catch (err) {
           notify(err.message, 'danger');
@@ -3372,7 +3596,7 @@ details.sg-card[open] > summary {
         if (!pending) return null;
         if (!preview) {
           return h('div', { className: 'sg-upload-preview' },
-            h('div', { className: 'sg-notice sg-info' }, h(Icon, { name: 'info' }), '正在解析并校验场景树…'));
+            h('div', { className: 'sg-notice sg-info' }, h(Icon, { name: 'info' }), '正在解析并校验技能…'));
         }
         if (!preview.ok) {
           return h('div', { className: 'sg-upload-preview' },
@@ -3383,47 +3607,76 @@ details.sg-card[open] > summary {
                 h('ul', { className: 'sg-reason-list' },
                   (preview.reasons || [preview.error]).filter(Boolean).map((reason) => h('li', { key: reason }, reason))))));
         }
-        const existing = state.catalog.skills || {};
+        const ignored = preview.ignoredFiles || [];
         return h('div', { className: 'sg-upload-preview' },
           h('div', { className: 'sg-notice sg-success' },
             h(Icon, { name: 'check' }),
             `已解析文件夹「${preview.name || pending.item.name || 'selected-folder'}」，校验通过。`),
           h('div', { className: 'sg-upload-summary' },
             h('div', { className: 'sg-upload-summary-item' },
-              h('div', { className: 'sg-upload-summary-label' }, '新建场景'),
-              h('div', { className: 'sg-upload-summary-value' }, (preview.sceneCounts && preview.sceneCounts.created) || 0)),
-            h('div', { className: 'sg-upload-summary-item' },
               h('div', { className: 'sg-upload-summary-label' }, '技能'),
-              h('div', { className: 'sg-upload-summary-value' }, preview.skillsImported || 0)),
+              h('div', { className: 'sg-upload-summary-value' }, preview.skillCount || 0)),
             h('div', { className: 'sg-upload-summary-item' },
               h('div', { className: 'sg-upload-summary-label' }, '文件'),
-              h('div', { className: 'sg-upload-summary-value' }, preview.fileCount || 0))),
+              h('div', { className: 'sg-upload-summary-value' }, preview.fileCount || 0)),
+            h('div', { className: 'sg-upload-summary-item' },
+              h('div', { className: 'sg-upload-summary-label' }, '忽略文件'),
+              h('div', { className: 'sg-upload-summary-value' }, ignored.length))),
           h('div', { className: 'sg-upload-list' },
             (preview.skills || []).map((skill) => h('div', { className: 'sg-upload-skill-row', key: skill.name },
               h('div', { className: 'sg-upload-skill-head' },
                 h('span', { className: 'sg-tree-icon' }, h(Icon, { name: 'skill' })),
                 h('span', { className: 'sg-upload-skill-name sg-mono' }, skill.name),
-                existing[skill.name]
+                skill.overwrite
                   ? h('span', { className: 'sg-badge sg-warning' }, '同名更新')
                   : h('span', { className: 'sg-badge sg-success' }, '新技能'),
                 h('span', { style: { marginLeft: 'auto', fontSize: 12, color: 'var(--sg-ink-3)' } }, `${skill.fileCount} 文件`)),
               h('div', { className: 'sg-upload-skill-desc' }, skill.description || '')))),
-          (preview.ignoredFiles || []).length
+          ignored.length
             ? h('div', { className: 'sg-field-hint', style: { marginTop: 8 } },
-                `场景目录中的普通文件不会作为技能资源导入：${preview.ignoredFiles.slice(0, 4).join('、')}${preview.ignoredFiles.length > 4 ? ' 等' : ''}`)
+                `技能文件夹之外的散文件会被忽略：${ignored.slice(0, 4).join('、')}${ignored.length > 4 ? ' 等' : ''}`)
             : null);
       };
 
+      const renderResult = () => {
+        if (!result) return null;
+        const session = result.session || {};
+        return h('div', { className: 'sg-upload-result' },
+          h('div', { className: 'sg-notice sg-success' },
+            h(Icon, { name: 'check' }),
+            h('div', null,
+              h('b', null, '上传完成。'),
+              h('div', { className: 'sg-upload-result-title' }, '技能已落盘并处于「未分类」状态；网关发现不会返回它们，直到整理会话把它们挂到场景。'),
+              h('ul', { className: 'sg-reason-list' },
+                h('li', { key: 'added' }, `新增技能：${result.added.length ? result.added.join('、') : '无'}`),
+                h('li', { key: 'overwritten' }, `同名覆盖：${result.overwritten.length ? result.overwritten.join('、') : '无'}`),
+                h('li', { key: 'ignored' }, `忽略散文件：${(result.ignoredFiles || []).length} 个`)))),
+          h('div', { className: 'sg-upload-result-actions' },
+            session.started
+              ? h('button', {
+                  className: 'sg-btn sg-btn-secondary',
+                  type: 'button',
+                  onClick: () => {
+                    if (onOpenSession && session.sessionId) onOpenSession(session.sessionId);
+                  },
+                }, h(Icon, { name: 'link' }), '打开整理会话')
+              : h('div', { className: 'sg-notice sg-warning', style: { flex: 1 } },
+                  h(Icon, { name: 'warning' }), session.error || '整理会话未能自动开启，可稍后在「一键整理」中触发。'),
+            h('button', { className: 'sg-btn sg-btn-ghost', type: 'button', onClick: onClose }, '完成')));
+      };
+
       return h(ModalShell, {
-        title: '上传场景树',
+        title: '上传',
         size: 'large',
-        footer: ModalFooter({
-          onClose,
-          busy: busy || reading,
-          submitLabel: '导入场景树',
-          onSubmit: submit,
-          disabled: !previewOk,
-        }),
+        footer: result
+          ? ModalFooter({ onClose, busy: false, submitLabel: '再传一批', onSubmit: () => { setResult(null); setPending(null); } })
+          : ModalFooter({
+              onClose,
+              busy: busy || reading,
+              submitLabel: '上传技能',
+              onSubmit: submit,
+              disabled: !previewOk,
+            }),
       },
         h('input', {
           ref: inputRef,
@@ -3433,19 +3686,21 @@ details.sg-card[open] > summary {
           style: { display: 'none' },
           onChange: onChooseFiles,
         }),
-        h('div', { className: 'sg-dropzone' },
-          h('span', { className: 'sg-dropzone-icon' }, h(Icon, { name: 'upload' })),
-          h('div', { className: 'sg-dropzone-title' }, '选择一个场景树文件夹'),
-          h('p', { className: 'sg-dropzone-desc' },
-            '所选文件夹作为场景树根目录与现有根场景合并。不含 SKILL.md 的文件夹识别为场景；含直接 SKILL.md 的文件夹整体识别为技能。ZIP 上传已移除。'),
-          h('div', { className: 'sg-dropzone-actions' },
-            h('button', { className: 'sg-btn sg-btn-secondary', type: 'button', onClick: chooseFolder },
-              h(Icon, { name: 'upload' }), '选择文件夹'),
-            h('button', { className: 'sg-btn sg-btn-ghost', type: 'button', onClick: () => setPendingUpload(sampleSuccessUploadItem()) },
-              h(Icon, { name: 'check' }), '载入成功示例'),
-            h('button', { className: 'sg-btn sg-btn-ghost', type: 'button', onClick: () => setPendingUpload(sampleFailureUploadItem()) },
-              h(Icon, { name: 'error' }), '载入校验失败示例'))),
-        renderPreview());
+        result
+          ? renderResult()
+          : h('div', { className: 'sg-dropzone' },
+              h('span', { className: 'sg-dropzone-icon' }, h(Icon, { name: 'upload' })),
+              h('div', { className: 'sg-dropzone-title' }, '选择一个技能文件夹'),
+              h('p', { className: 'sg-dropzone-desc' },
+                '递归收集所选文件夹下的每一个技能（含直接 SKILL.md 的文件夹整体为一个技能，子树资源全部保留）。文件夹层级不再产生场景：上传的技能处于「未分类」，由整理会话把它们归入场景。ZIP 上传已移除。'),
+              h('div', { className: 'sg-dropzone-actions' },
+                h('button', { className: 'sg-btn sg-btn-secondary', type: 'button', onClick: chooseFolder },
+                  h(Icon, { name: 'upload' }), '选择文件夹'),
+                h('button', { className: 'sg-btn sg-btn-ghost', type: 'button', onClick: () => setPendingUpload(sampleSuccessUploadItem()) },
+                  h(Icon, { name: 'check' }), '载入成功示例'),
+                h('button', { className: 'sg-btn sg-btn-ghost', type: 'button', onClick: () => setPendingUpload(sampleFailureUploadItem()) },
+                  h(Icon, { name: 'error' }), '载入校验失败示例'))),
+        result ? null : renderPreview());
     }
 
     function RelocateModal({ state, cwd, onClose, onSaved, notify }) {
@@ -3491,6 +3746,78 @@ details.sg-card[open] > summary {
         error ? h('div', { className: 'sg-form-error' }, error) : null);
     }
 
+    function RollbackConfirmModal({ modal, state, cwd, onClose, onSaved, notify }) {
+      const { slot } = modal.payload;
+      const isUpload = slot === 'upload';
+      const label = isUpload ? '上传' : '整理';
+      const [busy, setBusy] = useState(false);
+      const [error, setError] = useState('');
+      const [result, setResult] = useState(null);
+
+      const submit = async () => {
+        if (busy) return;
+        setBusy(true);
+        setError('');
+        try {
+          const response = await api('POST', withCwd('/skill-gateway/organize/rollback', cwd), { slot, cwd });
+          if (!response.ok) {
+            setError(response.error || '回滚失败。');
+            return;
+          }
+          setResult(response);
+          notify(`已回滚${label}：场景树已还原到${label}前的状态。`, 'success', 6000);
+          await onSaved();
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const affected = result && result.affected ? result.affected : null;
+      const affectedItems = [];
+      if (affected) {
+        if (affected.scenesDeleted && affected.scenesDeleted.length) affectedItems.push(`删除场景 ${affected.scenesDeleted.length} 个（${affected.scenesDeleted.map((scene) => scene.name).join('、')}）`);
+        if (affected.scenesRenamed && affected.scenesRenamed.length) affectedItems.push(`场景改名还原 ${affected.scenesRenamed.length} 个`);
+        if (affected.scenesChanged && affected.scenesChanged.length) affectedItems.push(`场景内容还原 ${affected.scenesChanged.length} 个`);
+        if (affected.removedSkills && affected.removedSkills.length) affectedItems.push(`删除本批新增技能文件 ${affected.removedSkills.length} 个（${affected.removedSkills.join('、')}）`);
+        if (affected.overwrittenSkills && affected.overwrittenSkills.length) affectedItems.push(`恢复被覆盖技能原文件 ${affected.overwrittenSkills.length} 个（${affected.overwrittenSkills.join('、')}）`);
+        if (affected.attachChanges && affected.attachChanges.length) affectedItems.push(`挂载关系还原 ${affected.attachChanges.length} 处`);
+      }
+
+      return h(ModalShell, {
+        title: `回滚${label}`,
+        footer: ModalFooter({
+          onClose,
+          busy,
+          submitLabel: result ? '完成' : `确认回滚${label}`,
+          submitKind: 'danger',
+          onSubmit: result ? onClose : submit,
+        }),
+      },
+        result
+          ? h('div', null,
+              h('div', { className: 'sg-notice sg-success' },
+                h(Icon, { name: 'check' }),
+                `回滚完成：场景树已还原到${label}前的整棵树。`),
+              affectedItems.length
+                ? h('div', { className: 'sg-field', style: { margin: '14px 0 0' } },
+                    h('span', { className: 'sg-field-label' }, '受影响内容'),
+                    h('ul', { className: 'sg-report-list' },
+                      affectedItems.map((item, index) => h('li', { key: index }, item))))
+                : null)
+          : h('div', null,
+              h('div', { className: 'sg-notice sg-warning' },
+                h(Icon, { name: 'warning' }),
+                h('div', null,
+                  h('b', null, `将还原到${label}前的整棵树。`),
+                  h('div', { className: 'sg-field-hint', style: { marginTop: 6 } },
+                    isUpload
+                      ? '上传回滚会删除本批新增技能的文件、恢复被覆盖技能的原文件，并还原场景树。'
+                      : '整理回滚只还原场景树（catalog），不触碰任何技能文件。'))),
+              error ? h('div', { className: 'sg-form-error' }, error) : null));
+    }
+
     function ModalHost(props) {
       const { modal, state, cwd, onClose, onSaved, notify, setModal } = props;
       const shared = { modal, state, cwd, onClose, onSaved, notify };
@@ -3512,6 +3839,8 @@ details.sg-card[open] > summary {
           return h(DeleteSkillModal, shared);
         case 'upload':
           return h(UploadModal, shared);
+        case 'rollback-confirm':
+          return h(RollbackConfirmModal, shared);
         case 'relocate':
           return h(RelocateModal, shared);
         default:
@@ -3727,7 +4056,7 @@ details.sg-card[open] > summary {
                 h('h3', { className: 'sg-empty-title' }, '加载中…'))) : null,
             state
               ? h('div', { style: { display: tab === 'catalog' ? 'block' : 'none' } },
-                  h(CatalogTab, { state, cwd, onChanged: refresh, notify, setModal }))
+                  h(CatalogTab, { state, cwd, onChanged: refresh, notify, setModal, onOpenSession: props.onOpenSession }))
               : null,
             state
               ? h('div', { style: { display: tab === 'stats' ? 'block' : 'none' } },
@@ -3748,6 +4077,7 @@ details.sg-card[open] > summary {
                 onSaved,
                 notify,
                 setModal,
+                onOpenSession: props.onOpenSession,
               }))
           : null,
         toasts.length
@@ -3762,10 +4092,18 @@ details.sg-card[open] > summary {
 
     function apply(ctx) {
       if (!ctx || !ctx.slots) return;
+      const openSession = (sessionId) => {
+        try {
+          const sessions = ctx.get ? ctx.get('sessions') : ctx.sessions;
+          if (sessions && typeof sessions.open === 'function' && sessionId) sessions.open(sessionId);
+        } catch {
+          // 会话服务不可用时忽略跳转。
+        }
+      };
       ctx.slots.inject('shell.overlay', () =>
         ctx.slots.register(
           { name: 'shell.overlay', id: 'skill-gateway-sidebar', order: 50, label: () => 'Skill Gateway' },
-          (props) => h(SkillGatewayOverlay, props || {}),
+          (props) => h(SkillGatewayOverlay, Object.assign({}, props || {}, { onOpenSession: openSession })),
         ));
     }
 

@@ -22,18 +22,19 @@ try {
 
 const {
   aggregateUsage,
+  applyOrganizeAction: coreApplyOrganizeAction,
+  applyUploadToCatalog: coreApplyUploadToCatalog,
   attachSkill: coreAttachSkill,
   browse: coreBrowse,
+  collectUploadSkills: coreCollectUploadSkills,
   createScene: coreCreateScene,
   deleteScene: coreDeleteScene,
   deleteSkill: coreDeleteSkill,
   detachSkill: coreDetachSkill,
-  importSceneTree: coreImportSceneTree,
   loadSkillFiles,
   recordUsage,
+  unclassifiedSkills,
   updateScene: coreUpdateScene,
-  upsertSkill: coreUpsertSkill,
-  validateUpload,
 } = coreModule;
 const { RepoStore } = repoStoreModule;
 
@@ -63,11 +64,13 @@ export class SkillGatewayService {
 
   async state(cwd = this.defaultCwd) {
     const store = this.storeFor(cwd);
-    const [catalog, usage, config, location] = await Promise.all([
+    const [catalog, usage, config, location, uploadSnapshot, organizeSnapshot] = await Promise.all([
       store.ensureCatalog(),
       store.loadUsage(),
       store.loadConfig(),
       store.locationInfo(),
+      store.loadSnapshot('upload'),
+      store.loadSnapshot('organize'),
     ]);
     return {
       ok: true,
@@ -76,6 +79,10 @@ export class SkillGatewayService {
       config,
       location,
       stats: aggregateUsage(usage, 'all'),
+      snapshots: {
+        upload: Boolean(uploadSnapshot),
+        organize: Boolean(organizeSnapshot),
+      },
     };
   }
 
@@ -199,110 +206,133 @@ export class SkillGatewayService {
     return { ok: true, skillName, skill, files: files || {} };
   }
 
-  async previewSceneTree(cwd, item, options = {}) {
+  /**
+   * Upload preview: validate the folder as a skill-only collection. Returns
+   * the skill list with per-item validation, overwrite hints and ignored
+   * files. Never persists anything and never touches the scene tree.
+   */
+  async previewUpload(cwd, item, options = {}) {
     const source = Array.isArray(item) ? { files: item } : item || {};
     if (!Array.isArray(source.files) || !source.files.length) {
-      return { ok: false, reasons: ['uploadSceneTree 需要非空的 item.files。'], name: source.name || null };
+      return { ok: false, reasons: ['上传需要非空的 item.files。'], name: source.name || null };
     }
 
-    const catalog = await this.ensureCatalog(cwd);
-    const result = coreImportSceneTree(catalog, source, {
-      now: options.now === undefined ? this.now() : options.now,
+    const result = coreCollectUploadSkills(source, {
       rootName: options.rootName,
       rootPath: options.rootPath,
-      random: options.random,
     });
     if (!result.ok) return result;
 
+    const catalog = await this.ensureCatalog(cwd);
+    const existingNames = new Set(Object.keys(catalog.skills || {}));
     return {
       ok: true,
       name: result.name,
-      sceneCounts: result.sceneCounts,
-      skillsImported: result.skillsImported,
-      skillsCreated: result.skillsCreated,
-      skillsUpdated: result.skillsUpdated,
+      skillCount: result.skillCount,
       fileCount: result.fileCount,
       ignoredFiles: result.ignoredFiles,
-      skills: (result.skills || []).map((skill) => ({
+      skills: result.skills.map((skill) => ({
         name: skill.name,
         description: skill.description,
-        fileCount: Object.keys(skill.files || {}).length,
+        fileCount: Object.keys(skill.files).length,
+        overwrite: existingNames.has(skill.name),
       })),
     };
   }
 
-  async uploadSkill(cwd, item, options = {}) {
-    const validation = validateUpload(item);
-    if (!validation.ok) return validation;
-
-    const skill = validation.skill;
-    const store = this.storeFor(cwd);
-    const catalog = await store.ensureCatalog();
-    const existing = catalog.skills[skill.name];
-
-    if (existing && options.confirm !== true) {
-      return {
-        ok: false,
-        confirmRequired: true,
-        existingSkill: existing,
-        skillName: skill.name,
-        reasons: [`技能 ${skill.name} 已存在，再次确认后将原地更新并保留使用历史。`],
-        name: item.name || skill.name,
-      };
-    }
-
-    const upsert = coreUpsertSkill(catalog, skill.name, skill.description, this.now());
-    if (!upsert.ok) return upsert;
-    await store.saveSkillFiles(skill.name, skill.files);
-    await store.saveCatalog(upsert.catalog);
-    return {
-      ok: true,
-      updated: upsert.updated,
-      skillName: skill.name,
-      catalog: upsert.catalog,
-      fileCount: Object.keys(skill.files).length,
-    };
-  }
-
-  async uploadSceneTree(cwd, item, options = {}) {
+  /**
+   * Upload: collect every skill under the folder, land the files, upsert the
+   * catalog (unclassified — no scene attachment), and snapshot the upload
+   * slot. Same-name skills are overwritten in place with their originals
+   * backed up for rollback. Opening an organize session afterwards is the
+   * host's responsibility.
+   */
+  async upload(cwd, item, options = {}) {
     const source = Array.isArray(item) ? { files: item } : item || {};
     if (!Array.isArray(source.files) || !source.files.length) {
-      return { ok: false, reasons: ['uploadSceneTree 需要非空的 item.files。'], name: source.name || null };
+      return { ok: false, reasons: ['上传需要非空的 item.files。'], name: source.name || null };
     }
+
+    const collected = coreCollectUploadSkills(source, {
+      rootName: options.rootName,
+      rootPath: options.rootPath,
+    });
+    if (!collected.ok) return collected;
 
     const store = this.storeFor(cwd);
     const catalog = await store.ensureCatalog();
-    const result = coreImportSceneTree(catalog, source, {
-      now: options.now === undefined ? this.now() : options.now,
-      rootName: options.rootName,
-      rootPath: options.rootPath,
-      random: options.random,
-    });
-    if (!result.ok) return result;
+    const applied = coreApplyUploadToCatalog(catalog, collected.skills, this.now());
+    if (!applied.ok) return applied;
 
-    for (const skill of result.skills) {
+    // Snapshot BEFORE any file write: it carries the pre-upload catalog and
+    // the batch manifest, and its slot keeps only the most recent snapshot.
+    await store.saveSnapshot('upload', {
+      catalog,
+      batch: { addedSkills: applied.added, overwrittenSkills: applied.overwritten },
+    });
+    for (const skillName of applied.overwritten) {
+      await store.backupSkillFiles('upload', skillName);
+    }
+    for (const skill of collected.skills) {
       await store.saveSkillFiles(skill.name, skill.files);
     }
-    await store.saveCatalog(result.catalog);
+    await store.saveCatalog(applied.catalog);
 
     return {
       ok: true,
-      catalog: result.catalog,
-      name: result.name,
-      scenesCreated: result.scenesCreated,
-      scenesReused: result.scenesReused,
-      sceneCounts: result.sceneCounts,
-      skillsImported: result.skillsImported,
-      skillsCreated: result.skillsCreated,
-      skillsUpdated: result.skillsUpdated,
-      skillNames: result.skillNames,
-      fileCount: result.fileCount,
-      ignoredFiles: result.ignoredFiles,
+      name: collected.name,
+      catalog: applied.catalog,
+      added: applied.added,
+      overwritten: applied.overwritten,
+      ignoredFiles: collected.ignoredFiles,
+      fileCount: collected.fileCount,
+      skillCount: collected.skillCount,
+      skills: collected.skills.map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+        fileCount: Object.keys(skill.files).length,
+      })),
     };
   }
 
-  async importSceneTree(cwd, item, options = {}) {
-    return this.uploadSceneTree(cwd, item, options);
+  /**
+   * Apply one skill_organize action against the current catalog and persist
+   * immediately. Skill files and skill descriptions stay read-only here; the
+   * pure rules live in core's applyOrganizeAction.
+   */
+  async organizeAction(cwd, action, args = {}) {
+    const store = this.storeFor(cwd);
+    const catalog = await store.ensureCatalog();
+    const result = coreApplyOrganizeAction(catalog, action, args);
+    if (!result.ok) return result;
+    await store.saveCatalog(result.catalog);
+    return { ok: true, action, result: result.result };
+  }
+
+  async saveOrganizeSnapshot(cwd) {
+    const store = this.storeFor(cwd);
+    const catalog = await store.ensureCatalog();
+    await store.saveSnapshot('organize', { catalog, batch: {} });
+    return { ok: true, slot: 'organize' };
+  }
+
+  async rollback(cwd, slot) {
+    return this.storeFor(cwd).rollbackSnapshot(slot);
+  }
+
+  async getOrganizeReport(cwd) {
+    const report = await this.storeFor(cwd).loadOrganizeReport();
+    return { ok: true, report };
+  }
+
+  async saveOrganizeReport(cwd, report) {
+    const saved = await this.storeFor(cwd).saveOrganizeReport(report);
+    return { ok: true, report: saved };
+  }
+
+  async unclassified(cwd) {
+    const catalog = await this.ensureCatalog(cwd);
+    return { ok: true, skills: unclassifiedSkills(catalog) };
   }
 
   async deleteSkill(cwd, skillName) {

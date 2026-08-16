@@ -28,6 +28,23 @@ function normalizeSceneInput(input = {}) {
   };
 }
 
+/** Minimum meaningful scene description length when description is required. */
+export const MIN_SCENE_DESCRIPTION_LENGTH = 8;
+
+function descriptionError(description, options = {}) {
+  if (!options.requireDescription) return null;
+  const min = Number.isFinite(options.minDescriptionLength)
+    ? Math.max(1, Math.floor(options.minDescriptionLength))
+    : MIN_SCENE_DESCRIPTION_LENGTH;
+  if (!description) {
+    return `场景 description 必填，需详细描述场景作用。`;
+  }
+  if (description.length < min) {
+    return `场景 description 过短（至少 ${min} 个字符），需详细描述场景作用。`;
+  }
+  return null;
+}
+
 function sceneNameExists(catalog, name, excludeId) {
   return Object.values(catalog.scenes || {}).some(
     (scene) => scene.name === name && scene.id !== excludeId,
@@ -48,6 +65,9 @@ export function createScene(catalog, parentId, input = {}, options = {}) {
 
   const draft = normalizeSceneInput(input);
   if (!draft.name) return { ok: false, error: '场景名称不能为空。' };
+
+  const descriptionProblem = descriptionError(draft.description, options);
+  if (descriptionProblem) return { ok: false, error: descriptionProblem };
 
   if (sceneNameExists(next, draft.name)) {
     return { ok: false, error: `场景名称已存在：${draft.name}` };
@@ -76,7 +96,7 @@ export function createScene(catalog, parentId, input = {}, options = {}) {
   return { ok: true, catalog: next, sceneId: id };
 }
 
-export function updateScene(catalog, sceneId, input = {}) {
+export function updateScene(catalog, sceneId, input = {}, options = {}) {
   if (!catalog || !catalog.scenes) return { ok: false, error: '目录无效。' };
   const next = clone(catalog);
   const scene = next.scenes[sceneId];
@@ -90,7 +110,12 @@ export function updateScene(catalog, sceneId, input = {}) {
     }
     scene.name = name;
   }
-  if (input.description !== undefined) scene.description = String(input.description).trim();
+  if (input.description !== undefined) {
+    const description = String(input.description).trim();
+    const descriptionProblem = descriptionError(description, options);
+    if (descriptionProblem) return { ok: false, error: descriptionProblem };
+    scene.description = description;
+  }
   if (input.tags !== undefined) scene.tags = normalizeTags(input.tags);
 
   return { ok: true, catalog: next };
@@ -130,6 +155,129 @@ export function deleteScene(catalog, sceneId) {
   }
   for (const id of deletedIds) delete next.scenes[id];
   return { ok: true, catalog: next, deletedIds };
+}
+
+/**
+ * Re-parent a scene below `parentId`. Cycles (moving a scene under itself or
+ * one of its descendants) and root moves are rejected.
+ */
+export function moveScene(catalog, sceneId, parentId) {
+  if (!catalog || !catalog.scenes) return { ok: false, error: '目录无效。' };
+  if (sceneId === catalog.rootSceneId) return { ok: false, error: '根场景不能移动。' };
+  const next = clone(catalog);
+  const scene = next.scenes[sceneId];
+  if (!scene) return { ok: false, error: '场景不存在。' };
+  const parent = next.scenes[parentId];
+  if (!parent) return { ok: false, error: '父场景不存在。' };
+  if (parentId === sceneId) return { ok: false, error: '不能移动到自身。' };
+  if (collectDescendants(next, sceneId).includes(parentId)) {
+    return { ok: false, error: '不能移动到自己的后代场景之下。' };
+  }
+
+  const oldParent = next.scenes[scene.parentId];
+  if (oldParent) {
+    oldParent.children = (oldParent.children || []).filter((id) => id !== sceneId);
+  }
+  scene.parentId = parentId;
+  if (!parent.children) parent.children = [];
+  if (!parent.children.includes(sceneId)) parent.children.push(sceneId);
+  return { ok: true, catalog: next };
+}
+
+/**
+ * Skills referenced by no scene — uploaded-but-unclassified skills and skills
+ * unlinked by scene deletion or detach. Gateway discovery never returns them.
+ */
+export function unclassifiedSkills(catalog) {
+  if (!catalog || !catalog.scenes || !catalog.skills) return [];
+  const referenced = new Set();
+  for (const scene of Object.values(catalog.scenes)) {
+    for (const name of scene.skills || []) referenced.add(name);
+  }
+  return Object.values(catalog.skills)
+    .filter((skill) => !referenced.has(skill.name))
+    .sort((a, b) => a.name.localeCompare(b.name, 'en'));
+}
+
+/**
+ * Structured change summary between two catalog values. Used by organize
+ * reports and rollback responses.
+ */
+export function diffCatalogs(before, after) {
+  const beforeScenes = (before && before.scenes) || {};
+  const afterScenes = (after && after.scenes) || {};
+  const beforeSkills = (before && before.skills) || {};
+  const afterSkills = (after && after.skills) || {};
+
+  const addedSkills = [];
+  const removedSkills = [];
+  const overwrittenSkills = [];
+  for (const [name, skill] of Object.entries(afterSkills)) {
+    if (!beforeSkills[name]) addedSkills.push(name);
+    else if (
+      beforeSkills[name].description !== skill.description ||
+      beforeSkills[name].updatedAt !== skill.updatedAt
+    ) {
+      overwrittenSkills.push(name);
+    }
+  }
+  for (const name of Object.keys(beforeSkills)) {
+    if (!afterSkills[name]) removedSkills.push(name);
+  }
+
+  const scenesCreated = [];
+  const scenesDeleted = [];
+  const scenesRenamed = [];
+  const scenesChanged = [];
+  for (const [id, scene] of Object.entries(afterScenes)) {
+    if (!beforeScenes[id]) {
+      scenesCreated.push({ id, name: scene.name });
+      continue;
+    }
+    const previous = beforeScenes[id];
+    const fields = [];
+    if (previous.name !== scene.name) {
+      scenesRenamed.push({ id, from: previous.name, to: scene.name });
+      fields.push('name');
+    }
+    if (previous.description !== scene.description) fields.push('description');
+    if (JSON.stringify(previous.tags || []) !== JSON.stringify(scene.tags || [])) fields.push('tags');
+    if (previous.parentId !== scene.parentId) fields.push('parent');
+    if (fields.length) scenesChanged.push({ id, name: scene.name, fields });
+  }
+  for (const [id, scene] of Object.entries(beforeScenes)) {
+    if (!afterScenes[id]) scenesDeleted.push({ id, name: scene.name });
+  }
+
+  const attachChanges = [];
+  for (const [id, scene] of Object.entries(afterScenes)) {
+    const previous = beforeScenes[id];
+    if (!previous) continue;
+    const beforeSet = new Set(previous.skills || []);
+    for (const skillName of scene.skills || []) {
+      if (!beforeSet.has(skillName)) {
+        attachChanges.push({ sceneId: id, sceneName: scene.name, skillName, kind: 'attach' });
+      }
+    }
+    for (const skillName of previous.skills || []) {
+      if (!(scene.skills || []).includes(skillName)) {
+        attachChanges.push({ sceneId: id, sceneName: scene.name, skillName, kind: 'detach' });
+      }
+    }
+  }
+
+  return {
+    addedSkills: [...addedSkills].sort(),
+    removedSkills: [...removedSkills].sort(),
+    overwrittenSkills: [...overwrittenSkills].sort(),
+    scenesCreated: scenesCreated.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+    scenesDeleted: scenesDeleted.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+    scenesRenamed: scenesRenamed.sort((a, b) => a.id.localeCompare(b.id)),
+    scenesChanged: scenesChanged.sort((a, b) => a.id.localeCompare(b.id)),
+    attachChanges: attachChanges.sort(
+      (a, b) => a.sceneId.localeCompare(b.sceneId) || a.skillName.localeCompare(b.skillName),
+    ),
+  };
 }
 
 export function attachSkill(catalog, sceneId, skillName) {

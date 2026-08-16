@@ -15,11 +15,13 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { createCatalog, makeId, SKILL_NAME_RE } from '../../core/src/index.js';
+import { createCatalog, diffCatalogs, makeId, SKILL_NAME_RE } from '../../core/src/index.js';
 
 export const DEFAULT_DATA_DIRNAME = '.skillgate';
 export const ANCHOR_FILENAME = '.skillgate-anchor';
 export const LOCK_FILENAME = '.write.lock';
+export const SNAPSHOT_SLOTS = Object.freeze(['upload', 'organize']);
+const SNAPSHOT_LABELS = { upload: '上传', organize: '整理' };
 const LOCK_STALE_MS = 15_000;
 
 function now() {
@@ -97,6 +99,21 @@ function assertRelativePath(rel) {
     throw new Error(`非法技能文件路径：${rel}`);
   }
   return normalized;
+}
+
+function assertSnapshotSlot(slot) {
+  if (!SNAPSHOT_SLOTS.includes(slot)) {
+    throw new Error(`非法快照槽位：${slot}（可用：${SNAPSHOT_SLOTS.join('、')}）。`);
+  }
+  return slot;
+}
+
+function snapshotPath(dataDir, slot) {
+  return path.join(dataDir, 'snapshots', `${slot}.json`);
+}
+
+function snapshotOverwritesDir(dataDir, slot) {
+  return path.join(dataDir, 'snapshots', slot, 'overwrites');
 }
 
 export async function resolveDataDir(cwd = process.cwd(), explicitDir = null) {
@@ -364,6 +381,122 @@ export class RepoStore {
         throw error;
       }
       return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    });
+  }
+
+  /**
+   * Persist one slot's snapshot: the whole catalog plus the batch manifest of
+   * this run's file changes. Call BEFORE `backupSkillFiles` for the same slot —
+   * saving clears the slot's previous file backups so each slot keeps only the
+   * most recent snapshot.
+   *
+   * @param {'upload'|'organize'} slot
+   * @param {{catalog: object, batch?: {addedSkills?: string[], overwrittenSkills?: string[]}}} snapshot
+   */
+  async saveSnapshot(slot, snapshot) {
+    assertSnapshotSlot(slot);
+    return this._enqueue(async () => {
+      const dataDir = await this.dataDir();
+      return this._withLock(dataDir, async () => {
+        const target = snapshotPath(dataDir, slot);
+        await fs.rm(snapshotOverwritesDir(dataDir, slot), { recursive: true, force: true });
+        const payload = {
+          slot,
+          createdAt: now(),
+          catalog: snapshot.catalog,
+          batch: {
+            addedSkills: [...(snapshot.batch && snapshot.batch.addedSkills) || []].sort(),
+            overwrittenSkills: [...(snapshot.batch && snapshot.batch.overwrittenSkills) || []].sort(),
+          },
+        };
+        await writeJsonFile(target, payload);
+        return payload;
+      });
+    });
+  }
+
+  async loadSnapshot(slot) {
+    assertSnapshotSlot(slot);
+    return this._enqueue(async () => {
+      const dataDir = await this.dataDir();
+      return readJsonFile(snapshotPath(dataDir, slot), null);
+    });
+  }
+
+  /**
+   * Copy a skill's current files into the slot's backup area. Call before the
+   * skill is overwritten so the original version can be restored by rollback.
+   */
+  async backupSkillFiles(slot, skillName) {
+    assertSnapshotSlot(slot);
+    assertSkillName(skillName);
+    return this._enqueue(async () => {
+      const dataDir = await this.dataDir();
+      return this._withLock(dataDir, async () => {
+        const source = path.join(dataDir, 'skills', skillName);
+        const target = path.join(snapshotOverwritesDir(dataDir, slot), skillName);
+        if (await pathExists(source)) {
+          await copyTree(source, target);
+          return { skillName, backedUp: true };
+        }
+        return { skillName, backedUp: false };
+      });
+    });
+  }
+
+  /**
+   * Roll one slot back: restore the whole catalog from its snapshot. The
+   * upload slot additionally deletes this batch's added skill files and
+   * restores the overwritten skills' original files; the organize slot never
+   * touches skill files. The snapshot is kept so a repeated rollback is
+   * harmless.
+   */
+  async rollbackSnapshot(slot) {
+    assertSnapshotSlot(slot);
+    return this._enqueue(async () => {
+      const dataDir = await this.dataDir();
+      return this._withLock(dataDir, async () => {
+        const snapshot = await readJsonFile(snapshotPath(dataDir, slot), null);
+        if (!snapshot || !snapshot.catalog) {
+          return { ok: false, error: `没有「${SNAPSHOT_LABELS[slot]}」快照可回滚（快照槽位为空）。` };
+        }
+
+        const catalogFile = path.join(dataDir, 'catalog.json');
+        const current = await readJsonFile(catalogFile, null);
+        const affected = diffCatalogs(current, snapshot.catalog);
+
+        if (slot === 'upload') {
+          for (const skillName of snapshot.batch.addedSkills || []) {
+            await fs.rm(path.join(dataDir, 'skills', assertSkillName(skillName)), { recursive: true, force: true });
+          }
+          for (const skillName of snapshot.batch.overwrittenSkills || []) {
+            const backup = path.join(snapshotOverwritesDir(dataDir, slot), skillName);
+            const target = path.join(dataDir, 'skills', assertSkillName(skillName));
+            if (await pathExists(backup)) {
+              await fs.rm(target, { recursive: true, force: true });
+              await copyTree(backup, target);
+            }
+          }
+        }
+
+        await writeJsonFile(catalogFile, snapshot.catalog);
+        return { ok: true, slot, catalog: snapshot.catalog, affected };
+      });
+    });
+  }
+
+  async saveOrganizeReport(report) {
+    return this._enqueue(async () => {
+      const dataDir = await this.dataDir();
+      await writeJsonFile(path.join(dataDir, 'organize-report.json'), report);
+      return report;
+    });
+  }
+
+  async loadOrganizeReport() {
+    return this._enqueue(async () => {
+      const dataDir = await this.dataDir();
+      return readJsonFile(path.join(dataDir, 'organize-report.json'), null);
     });
   }
 

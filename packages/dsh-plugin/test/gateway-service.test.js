@@ -21,68 +21,213 @@ test('service state initializes a catalog and toggle defaults to on', async (t) 
   assert.equal(state.usage.length, 0);
 });
 
-test('service upload validates, persists files, and rejects duplicate without confirmation', async (t) => {
+test('service upload persists skills unclassified and reports added/overwritten/ignored', async (t) => {
   const { service } = await tempService(t);
   const item = {
-    name: 'tdd',
-    files: [{ path: 'SKILL.md', content: '---\nname: tdd\ndescription: test first\n---\n# TDD' }],
-  };
-
-  const first = await service.uploadSkill(undefined, item);
-  assert.equal(first.ok, true);
-  assert.equal(first.updated, false);
-
-  const blocked = await service.uploadSkill(undefined, item);
-  assert.equal(blocked.ok, false);
-  assert.equal(blocked.confirmRequired, true);
-
-  const confirmed = await service.uploadSkill(undefined, item, { confirm: true });
-  assert.equal(confirmed.ok, true);
-  assert.equal(confirmed.updated, true);
-});
-
-test('service uploadSceneTree persists scenes/skills and overwrites same-name skills', async (t) => {
-  const { service } = await tempService(t);
-  const item = {
-    name: 'scene-tree',
+    name: 'skills-folder',
     files: [
-      { path: 'scene-tree/后端开发/数据库设计/SKILL.md', content: '---\nname: db-schema-design\ndescription: 第一版\n---\n# v1' },
-      { path: 'scene-tree/后端开发/数据库设计/templates/init.sql', content: 'select 1;' },
-      { path: 'scene-tree/前端开发/README.md', content: 'ignored' },
+      { path: '后端开发/数据库设计/SKILL.md', content: '---\nname: db-schema-design\ndescription: 数据库设计\n---\n# v1' },
+      { path: '后端开发/数据库设计/templates/init.sql', content: 'select 1;' },
+      { path: '前端/README.md', content: 'ignored' },
     ],
   };
 
-  const first = await service.uploadSceneTree(undefined, item);
+  const first = await service.upload(undefined, item);
   assert.equal(first.ok, true);
-  assert.equal(first.sceneCounts.created, 2);
-  assert.equal(first.sceneCounts.reused, 0);
-  assert.equal(first.skillsImported, 1);
-  assert.equal(first.skillsCreated, 1);
+  assert.deepEqual(first.added, ['db-schema-design']);
+  assert.deepEqual(first.overwritten, []);
+  assert.deepEqual(first.ignoredFiles, ['前端/README.md']);
+  assert.equal(first.fileCount, 2);
 
   const loaded = await service.storeFor(undefined).loadSkillFiles('db-schema-design');
   assert.deepEqual(Object.keys(loaded).sort(), ['SKILL.md', 'templates/init.sql']);
 
-  const second = await service.uploadSceneTree(undefined, {
-    name: 'scene-tree',
+  const state = await service.state();
+  assert.deepEqual(state.catalog.scenes.root.skills, []);
+  assert.deepEqual(Object.keys(state.catalog.skills), ['db-schema-design']);
+
+  const second = await service.upload(undefined, {
+    name: 'skills-folder',
     files: [
-      { path: 'scene-tree/后端开发/数据库设计/SKILL.md', content: '---\nname: db-schema-design\ndescription: 第二版\n---\n# v2' },
-      { path: 'scene-tree/后端开发/数据库设计/extra.md', content: 'extra' },
+      { path: 'db-schema-design/SKILL.md', content: '---\nname: db-schema-design\ndescription: 第二版\n---\n# v2' },
+      { path: 'db-schema-design/extra.md', content: 'extra' },
+      { path: 'brand-new/SKILL.md', content: '---\nname: brand-new\ndescription: 全新技能\n---\n' },
     ],
   });
   assert.equal(second.ok, true);
-  assert.equal(second.sceneCounts.created, 0);
-  assert.equal(second.sceneCounts.reused, 1);
-  assert.equal(second.skillsUpdated, 1);
-  assert.equal(second.skillsCreated, 0);
+  assert.deepEqual(second.added, ['brand-new']);
+  assert.deepEqual(second.overwritten, ['db-schema-design']);
 
   const overwritten = await service.storeFor(undefined).loadSkillFiles('db-schema-design');
   assert.deepEqual(Object.keys(overwritten).sort(), ['SKILL.md', 'extra.md']);
   assert.match(overwritten['SKILL.md'], /第二版/);
+
+  // Uploaded skills land unclassified: no scene attachment, visible to the
+  // unclassified query, invisible to browse.
+  const unclassified = await service.unclassified(undefined);
+  assert.deepEqual(unclassified.skills.map((skill) => skill.name), ['brand-new', 'db-schema-design']);
+  const browse = await service.browse(undefined, 'root');
+  assert.deepEqual(browse.skills, []);
+});
+
+test('service upload rejects the whole batch when any skill is invalid and keeps the catalog untouched', async (t) => {
+  const { service } = await tempService(t);
+  const result = await service.upload(undefined, {
+    name: 'bad',
+    files: [
+      { path: 'good/SKILL.md', content: '---\nname: good\ndescription: fine\n---\n' },
+      { path: 'bad/SKILL.md', content: '---\nname: Bad Name\ndescription: x\n---\n' },
+    ],
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.reasons.join(' '), /name 不符合/);
+  const state = await service.state();
+  assert.deepEqual(Object.keys(state.catalog.skills), []);
+});
+
+test('service upload snapshots the upload slot with the pre-upload catalog and batch', async (t) => {
+  const { service } = await tempService(t);
+  const item = {
+    name: 'folder',
+    files: [
+      { path: 'a/SKILL.md', content: '---\nname: skill-a\ndescription: 技能甲\n---\n' },
+      { path: 'b/SKILL.md', content: '---\nname: skill-b\ndescription: 技能乙\n---\n' },
+    ],
+  };
+  const first = await service.upload(undefined, item);
+  assert.equal(first.ok, true);
+
+  const snapshot = await service.storeFor(undefined).loadSnapshot('upload');
+  assert.equal(snapshot.slot, 'upload');
+  assert.deepEqual(snapshot.batch.addedSkills, ['skill-a', 'skill-b']);
+  assert.deepEqual(Object.keys(snapshot.catalog.skills), []);
+});
+
+test('service rollback restores the pre-upload catalog and deletes uploaded skill files', async (t) => {
+  const { service } = await tempService(t);
+  const item = {
+    name: 'folder',
+    files: [
+      { path: 'a/SKILL.md', content: '---\nname: skill-a\ndescription: 技能甲\n---\n' },
+    ],
+  };
+  await service.upload(undefined, item);
+  await service.attachSkill(undefined, 'root', 'skill-a');
+
+  const rollback = await service.rollback(undefined, 'upload');
+  assert.equal(rollback.ok, true);
+  assert.deepEqual(Object.keys(rollback.catalog.skills), []);
+  assert.deepEqual(rollback.affected.removedSkills, ['skill-a']);
+  assert.deepEqual(rollback.catalog.scenes.root.skills, []);
+
+  const files = await service.storeFor(undefined).loadSkillFiles('skill-a');
+  assert.equal(files, null);
+});
+
+test('service rollback restores overwritten skill originals and removes batch-added files', async (t) => {
+  const { service } = await tempService(t);
+  const v1 = {
+    name: 'folder',
+    files: [
+      { path: 'a/SKILL.md', content: '---\nname: skill-a\ndescription: 技能甲 v1\n---\n# v1' },
+      { path: 'a/tools/helper.sh', content: 'echo v1' },
+    ],
+  };
+  await service.upload(undefined, v1);
+  await service.attachSkill(undefined, 'root', 'skill-a');
+
+  // Second upload overwrites skill-a and adds skill-b.
+  const second = await service.upload(undefined, {
+    name: 'folder',
+    files: [
+      { path: 'a/SKILL.md', content: '---\nname: skill-a\ndescription: 技能甲 v2\n---\n# v2' },
+      { path: 'a/extra.md', content: 'extra' },
+      { path: 'b/SKILL.md', content: '---\nname: skill-b\ndescription: 技能乙\n---\n' },
+    ],
+  });
+  assert.deepEqual(second.overwritten, ['skill-a']);
+  assert.deepEqual(second.added, ['skill-b']);
+
+  const rollback = await service.rollback(undefined, 'upload');
+  assert.equal(rollback.ok, true);
+  assert.ok(rollback.affected.overwrittenSkills.includes('skill-a'));
+  assert.ok(rollback.affected.removedSkills.includes('skill-b'));
+
+  const restored = await service.storeFor(undefined).loadSkillFiles('skill-a');
+  assert.deepEqual(Object.keys(restored).sort(), ['SKILL.md', 'tools/helper.sh']);
+  assert.match(restored['SKILL.md'], /v1/);
+
+  const state = await service.state();
+  assert.deepEqual(Object.keys(state.catalog.skills), ['skill-a']);
+  assert.deepEqual(state.catalog.scenes.root.skills, ['skill-a']);
+});
+
+test('service organizeAction applies and persists one tool action at a time', async (t) => {
+  const { service } = await tempService(t);
+  const created = await service.organizeAction(undefined, 'createScene', {
+    parentId: 'root',
+    name: '数据工程',
+    description: '数据管道、仓库建模与批处理任务的场景',
+  });
+  assert.equal(created.ok, true);
+  const sceneId = created.result.sceneId;
+
+  const renamed = await service.organizeAction(undefined, 'updateScene', {
+    sceneId,
+    name: '数据工程与仓库',
+  });
+  assert.equal(renamed.ok, true);
+
+  const blocked = await service.organizeAction(undefined, 'deleteSkill', { skillName: 'anything' });
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /仅用户/);
+
+  const state = await service.state();
+  assert.equal(state.catalog.scenes[sceneId].name, '数据工程与仓库');
+});
+
+test('service organize snapshot and organize-slot rollback restore the catalog only', async (t) => {
+  const { service } = await tempService(t);
+  await service.upload(undefined, {
+    name: 'folder',
+    files: [{ path: 'a/SKILL.md', content: '---\nname: skill-a\ndescription: 技能甲\n---\n' }],
+  });
+  await service.attachSkill(undefined, 'root', 'skill-a');
+
+  await service.saveOrganizeSnapshot(undefined);
+  await service.organizeAction(undefined, 'createScene', {
+    parentId: 'root',
+    name: '临时场景',
+    description: '整理会话中创建随后被回滚的场景说明',
+  });
+
+  const rollback = await service.rollback(undefined, 'organize');
+  assert.equal(rollback.ok, true);
+  assert.ok(rollback.affected.scenesDeleted.some((scene) => scene.name === '临时场景'));
+  // Organize rollback never touches skill files.
+  const files = await service.storeFor(undefined).loadSkillFiles('skill-a');
+  assert.ok(files['SKILL.md']);
+});
+
+test('service organize reports persist and load back', async (t) => {
+  const { service } = await tempService(t);
+  assert.equal((await service.getOrganizeReport(undefined)).report, null);
+  await service.saveOrganizeReport(undefined, {
+    mode: 'detect',
+    sessionId: 'session-1',
+    summary: {},
+    conflicts: ['场景边界模糊'],
+    duplicates: [],
+  });
+  const { report } = await service.getOrganizeReport(undefined);
+  assert.equal(report.mode, 'detect');
+  assert.deepEqual(report.conflicts, ['场景边界模糊']);
 });
 
 test('service previewSkillFiles reads files without recording usage', async (t) => {
   const { service } = await tempService(t);
-  await service.uploadSkill(undefined, {
+  await service.upload(undefined, {
+    name: 'tdd',
     files: [{ path: 'SKILL.md', content: '---\nname: tdd\ndescription: test first\n---\n# TDD' }],
   });
 
@@ -96,41 +241,34 @@ test('service previewSkillFiles reads files without recording usage', async (t) 
   assert.equal(after.stats.total, before.stats.total);
 });
 
-test('service previewSceneTree validates and summarizes without persisting', async (t) => {
+test('service previewUpload validates and summarizes without persisting', async (t) => {
   const { service } = await tempService(t);
   const item = {
-    name: 'scene-tree',
+    name: 'skills-folder',
     files: [
-      { path: 'scene-tree/后端开发/数据库设计/SKILL.md', content: '---\nname: db-schema-design\ndescription: 第一版\n---\n# v1' },
-      { path: 'scene-tree/后端开发/数据库设计/templates/init.sql', content: 'select 1;' },
+      { path: '后端开发/数据库设计/SKILL.md', content: '---\nname: db-schema-design\ndescription: 第一版\n---\n# v1' },
+      { path: '后端开发/数据库设计/templates/init.sql', content: 'select 1;' },
+      { path: '前端/README.md', content: 'ignored' },
     ],
   };
 
-  const preview = await service.previewSceneTree(undefined, item);
+  const preview = await service.previewUpload(undefined, item);
   assert.equal(preview.ok, true);
-  assert.equal(preview.sceneCounts.created, 1);
-  assert.equal(preview.skillsImported, 1);
+  assert.equal(preview.skillCount, 1);
   assert.equal(preview.skills[0].fileCount, 2);
+  assert.equal(preview.skills[0].overwrite, false);
+  assert.deepEqual(preview.ignoredFiles, ['前端/README.md']);
 
   const state = await service.state();
-  assert.deepEqual(state.catalog.scenes, {
-    root: {
-      id: 'root',
-      name: '工作台',
-      description: '所有场景的单一根节点，场景树从这里展开。',
-      tags: ['workspace'],
-      parentId: null,
-      children: [],
-      skills: [],
-    },
-  });
   assert.deepEqual(Object.keys(state.catalog.skills), []);
 });
 
 test('service stats keeps the timeline session-scoped and globals workspace-scoped', async (t) => {
   const { service } = await tempService(t);
-  const files = [{ path: 'SKILL.md', content: '---\nname: tdd\ndescription: test first\n---\n' }];
-  await service.uploadSkill(undefined, { files });
+  await service.upload(undefined, {
+    name: 'tdd',
+    files: [{ path: 'SKILL.md', content: '---\nname: tdd\ndescription: test first\n---\n' }],
+  });
   await service.recordAgentSkillUse(undefined, 'tdd', 's1');
   await service.recordAgentSkillUse(undefined, 'code-review', 's3');
   await service.load(undefined, 'tdd', '', 's2');
@@ -155,7 +293,8 @@ test('service stats keeps the timeline session-scoped and globals workspace-scop
 
 test('service load records gateway usage and deleteSkill keeps history', async (t) => {
   const { service } = await tempService(t);
-  await service.uploadSkill(undefined, {
+  await service.upload(undefined, {
+    name: 'tdd',
     files: [{ path: 'SKILL.md', content: '---\nname: tdd\ndescription: test first\n---\n' }],
   });
   await service.attachSkill(undefined, 'root', 'tdd');
