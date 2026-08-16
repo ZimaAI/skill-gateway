@@ -18,7 +18,6 @@ import { randomUUID } from 'node:crypto';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { SessionId } from '@deepseek-ai/dsh-session';
-import { diffCatalogs } from '../../core/src/index.js';
 import {
   buildOrganizePrompt,
   extractOrganizeReport,
@@ -44,6 +43,14 @@ function getService(ctx, key) {
   const service = ctx.get ? ctx.get(key) : ctx[key];
   return service;
 }
+
+let coreModule;
+try {
+  coreModule = await import('@skill-gate/core');
+} catch {
+  coreModule = await import('../../core/src/index.js');
+}
+const { diffCatalogs } = coreModule;
 
 function lastAssistantText(session) {
   const events = (session && session.events) || [];
