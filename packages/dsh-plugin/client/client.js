@@ -2583,56 +2583,57 @@ details.sg-card[open] > summary {
             onChange: (event) => setQuery(event.target.value),
           })),
         view === 'tree'
-          ? (searchText && !sceneTreeMatches(catalog, catalog.rootSceneId, searchText)
-              ? h('div', { className: 'sg-card' },
-                  h('div', { className: 'sg-empty' },
-                    h('div', { className: 'sg-empty-icon' }, h(Icon, { name: 'search' })),
-                    h('h3', { className: 'sg-empty-title' }, '没有匹配的场景或技能'),
-                    h('p', { className: 'sg-empty-desc' }, '换个关键词，或先创建场景、上传技能。'),
-                    h('div', { className: 'sg-empty-actions' },
-                      h('button', {
-                        className: 'sg-btn sg-btn-secondary',
-                        type: 'button',
-                        onClick: () => setQuery(''),
-                      }, '清除搜索'))))
-              : h('div', { className: 'sg-card sg-tree-card' },
-                  h(SceneTreeNode, {
-                    key: treeRoot ? treeRoot.id : 'missing',
-                    catalog,
-                    scene: treeRoot,
-                    depth: 0,
-                    query: searchText,
-                    collapsed,
-                    selectedId,
-                    onSelect: setSelectedId,
-                    onToggle: (sceneId) => {
-                      setCollapsed((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(sceneId)) next.delete(sceneId);
-                        else next.add(sceneId);
-                        return next;
-                      });
-                    },
-                    onAddChild: (parentId) => setModal({
-                      type: 'scene-create',
-                      payload: {
-                        parentId,
-                        onCreated: (newSceneId, createdParentId) => {
-                          setSelectedId(newSceneId);
-                          setCollapsed((prev) => {
-                            const next = new Set(prev);
-                            next.delete(createdParentId);
-                            return next;
-                          });
-                        },
+          ? h(React.Fragment, null,
+              searchText && !sceneTreeMatches(catalog, catalog.rootSceneId, searchText)
+                ? h('div', { className: 'sg-card' },
+                    h('div', { className: 'sg-empty' },
+                      h('div', { className: 'sg-empty-icon' }, h(Icon, { name: 'search' })),
+                      h('h3', { className: 'sg-empty-title' }, '没有匹配的场景或技能'),
+                      h('p', { className: 'sg-empty-desc' }, '换个关键词，或先创建场景、上传技能。'),
+                      h('div', { className: 'sg-empty-actions' },
+                        h('button', {
+                          className: 'sg-btn sg-btn-secondary',
+                          type: 'button',
+                          onClick: () => setQuery(''),
+                        }, '清除搜索'))))
+                : h('div', { className: 'sg-card sg-tree-card' },
+                    h(SceneTreeNode, {
+                      key: treeRoot ? treeRoot.id : 'missing',
+                      catalog,
+                      scene: treeRoot,
+                      depth: 0,
+                      query: searchText,
+                      collapsed,
+                      selectedId,
+                      onSelect: setSelectedId,
+                      onToggle: (sceneId) => {
+                        setCollapsed((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(sceneId)) next.delete(sceneId);
+                          else next.add(sceneId);
+                          return next;
+                        });
                       },
-                    }),
-                    onEdit: (sceneId) => setModal({ type: 'scene-edit', payload: { sceneId } }),
-                    onDelete: (sceneId) => setModal({ type: 'delete-scene', payload: { sceneId } }),
-                    onManageSkills: (sceneId) => setModal({ type: 'skill-picker', payload: { sceneId } }),
-                    onSkillDetail: (skillName) => setModal({ type: 'skill-detail', payload: { skillName } }),
-                    onDetachSkill: detachSkill,
-                  })),
+                      onAddChild: (parentId) => setModal({
+                        type: 'scene-create',
+                        payload: {
+                          parentId,
+                          onCreated: (newSceneId, createdParentId) => {
+                            setSelectedId(newSceneId);
+                            setCollapsed((prev) => {
+                              const next = new Set(prev);
+                              next.delete(createdParentId);
+                              return next;
+                            });
+                          },
+                        },
+                      }),
+                      onEdit: (sceneId) => setModal({ type: 'scene-edit', payload: { sceneId } }),
+                      onDelete: (sceneId) => setModal({ type: 'delete-scene', payload: { sceneId } }),
+                      onManageSkills: (sceneId) => setModal({ type: 'skill-picker', payload: { sceneId } }),
+                      onSkillDetail: (skillName) => setModal({ type: 'skill-detail', payload: { skillName } }),
+                      onDetachSkill: detachSkill,
+                    })),
               !searchText
                 ? h(UnclassifiedCard, {
                     catalog,
