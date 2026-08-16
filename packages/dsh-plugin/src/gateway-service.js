@@ -349,6 +349,22 @@ export class SkillGatewayService {
     return this.storeFor(cwd).loadConfig();
   }
 
+  async getSessionConfig(cwd = this.defaultCwd) {
+    const config = await this.getConfig(cwd);
+    return config.session;
+  }
+
+  /**
+   * Save workspace-level defaults for organize sessions created by upload /
+   * one-click organize / conflict detection. Empty values intentionally mean
+   * “follow the deployment default”; host-side validation happens at route
+   * save time, while repo persistence stays framework-free and lossless.
+   */
+  async saveSessionConfig(cwd, session = {}) {
+    const config = await this.storeFor(cwd).saveConfig({ session });
+    return { ok: true, config, session: config.session };
+  }
+
   async setEnabled(cwd, enabled) {
     const config = await this.storeFor(cwd).saveConfig({ enabled: enabled !== false });
     return { ok: true, config };

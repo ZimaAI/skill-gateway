@@ -40,6 +40,41 @@ test('catalog and config write/read back after a fresh store instance', async (t
   assert.deepEqual(loaded.scenes.backend.tags, ['backend', 'server']);
 });
 
+test('config persists normalized workspace session defaults and survives a toggle save', async (t) => {
+  const { dir, store } = await tempRepo();
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  assert.deepEqual((await store.loadConfig()).session, {
+    mode: '',
+    provider: '',
+    model: '',
+    reasoningEffort: '',
+    permission: '',
+  });
+
+  const saved = await store.saveConfig({
+    enabled: true,
+    session: {
+      mode: 'code',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      reasoningEffort: 'high',
+      permission: 'workspace-write',
+      unknown: 'ignored',
+    },
+  });
+  assert.equal(saved.session.mode, 'code');
+  assert.equal('unknown' in saved.session, false);
+
+  // Enabled-only writes must not wipe persisted session defaults.
+  await store.saveConfig({ enabled: false });
+  const reopened = new RepoStore({ cwd: dir });
+  const loaded = await reopened.loadConfig();
+  assert.equal(loaded.enabled, false);
+  assert.equal(loaded.session.model, 'deepseek-chat');
+  assert.equal(loaded.session.reasoningEffort, 'high');
+});
+
 test('usage appends survive reopen, merge by id, and sort by timestamp', async (t) => {
   const { dir, store } = await tempRepo();
   t.after(() => fs.rm(dir, { recursive: true, force: true }));

@@ -289,6 +289,211 @@ export function apply(ctx, config = {}) {
     });
   }
 
+  function getService(ctx, key) {
+    const service = ctx.get ? ctx.get(key) : ctx[key];
+    return service;
+  }
+
+  function sessionChoiceText(value) {
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  function presetChoice(preset) {
+    if (!preset) return null;
+    return {
+      id: sessionChoiceText(preset.id),
+      name: sessionChoiceText(preset.name) || sessionChoiceText(preset.id),
+      description: sessionChoiceText(preset.description),
+      broken: sessionChoiceText(preset.broken),
+      trust: sessionChoiceText(preset.trust),
+    };
+  }
+
+  async function buildSessionConfigOptions(ctx, cwd) {
+    const config = await service.getConfig(cwd);
+    const session = config.session || {};
+
+    const presetsService = getService(ctx, 'agentPresets');
+    const modes = [];
+    if (presetsService && typeof presetsService.list === 'function') {
+      try {
+        const list = await presetsService.list();
+        for (const preset of list || []) {
+          const choice = presetChoice(preset);
+          if (choice && choice.id) modes.push(choice);
+        }
+      } catch (error) {
+        (ctx.logger || console).warn('[skill-gateway] failed to list agent presets:', error);
+      }
+    }
+    const defaultMode = sessionChoiceText(organize.preset) ||
+      sessionChoiceText(presetsService && presetsService.defaultId) || '';
+
+    const permissionPresets = getService(ctx, 'permissionPresets');
+    const permissions = [];
+    if (permissionPresets) {
+      const names = permissionPresets.names || [];
+      for (const presetName of names) {
+        try {
+          const option = permissionPresets.optionOf(presetName);
+          permissions.push({
+            id: sessionChoiceText(option && option.value) || presetName,
+            name: sessionChoiceText(option && option.name) || presetName,
+            description: sessionChoiceText(option && option.description),
+          });
+        } catch {
+          permissions.push({ id: presetName, name: presetName, description: '' });
+        }
+      }
+    }
+    const defaultPermission = sessionChoiceText(permissionPresets && permissionPresets.defaultPreset) || '';
+
+    const llm = getService(ctx, 'llm');
+    const providers = [];
+    if (llm && typeof llm.listProviders === 'function') {
+      try {
+        for (const provider of llm.listProviders() || []) {
+          const id = sessionChoiceText(provider && provider.id);
+          if (!id) continue;
+          providers.push({
+            id,
+            name: sessionChoiceText(provider && provider.name) || id,
+          });
+        }
+      } catch (error) {
+        (ctx.logger || console).warn('[skill-gateway] failed to list LLM providers:', error);
+      }
+    }
+
+    const defaultModel = getService(ctx, 'agentDefaultModel');
+    let currentModel = null;
+    try {
+      const selection = defaultModel && typeof defaultModel.currentSelection === 'function'
+        ? defaultModel.currentSelection()
+        : null;
+      if (selection && selection.provider && selection.model) {
+        currentModel = {
+          provider: selection.provider,
+          model: selection.model,
+          reasoningEffort: sessionChoiceText(selection.reasoningEffort),
+        };
+      }
+    } catch {
+      currentModel = null;
+    }
+
+    return {
+      ok: true,
+      session,
+      modes,
+      defaultMode,
+      permissions,
+      defaultPermission,
+      providers,
+      currentModel,
+    };
+  }
+
+  async function buildSessionModelOptions(ctx, provider) {
+    const llm = getService(ctx, 'llm');
+    if (!llm || typeof llm.listModels !== 'function') {
+      return { ok: false, error: '宿主未提供 llm 服务，无法列出模型。' };
+    }
+    const models = await llm.listModels(provider);
+    const choices = (models || []).map((model) => ({
+      id: sessionChoiceText(model && model.id),
+      name: sessionChoiceText(model && model.name) || sessionChoiceText(model && model.id),
+      description: sessionChoiceText(model && model.description),
+    })).filter((model) => model.id);
+    return {
+      ok: true,
+      provider,
+      models: choices,
+    };
+  }
+
+  async function buildSessionModelInfo(ctx, provider, model) {
+    const llm = getService(ctx, 'llm');
+    if (!llm || typeof llm.resolveModelInfo !== 'function') {
+      return { ok: false, error: '宿主未提供 llm 服务，无法读取模型推理等级。' };
+    }
+    const info = await llm.resolveModelInfo(provider, model);
+    return {
+      ok: true,
+      provider,
+      model,
+      name: sessionChoiceText(info && info.name) || model,
+      reasoning: info && info.reasoning
+        ? {
+            efforts: (info.reasoning.efforts || []).map((effort) => ({
+              id: sessionChoiceText(effort && effort.id),
+              name: sessionChoiceText(effort && effort.name) || sessionChoiceText(effort && effort.id),
+              description: sessionChoiceText(effort && effort.description),
+            })),
+            defaultEffort: sessionChoiceText(info.reasoning.defaultEffort),
+          }
+        : null,
+    };
+  }
+
+  async function validateSessionConfig(ctx, input = {}) {
+    const provider = sessionChoiceText(input.provider);
+    const model = sessionChoiceText(input.model);
+    const mode = sessionChoiceText(input.mode);
+    const permission = sessionChoiceText(input.permission);
+    if (Boolean(provider) !== Boolean(model)) {
+      return { ok: false, error: '模型与提供方必须同时填写，或同时留空以跟随部署默认。' };
+    }
+
+    if (mode) {
+      const presetsService = getService(ctx, 'agentPresets');
+      if (!presetsService || typeof presetsService.resolve !== 'function') {
+        return { ok: false, error: `宿主未提供 Agent 预设服务，无法使用模式「${mode}」。` };
+      }
+      try {
+        const resolved = await presetsService.resolve(mode);
+        if (resolved && resolved.broken) {
+          return { ok: false, error: `模式「${mode}」不可用：${resolved.broken}` };
+        }
+      } catch (error) {
+        return { ok: false, error: `模式「${mode}」不可用：${error && error.message ? error.message : String(error)}` };
+      }
+    }
+
+    if (permission) {
+      const permissionPresets = getService(ctx, 'permissionPresets');
+      if (!permissionPresets || typeof permissionPresets.set !== 'function') {
+        return { ok: false, error: `宿主未提供权限预设服务，无法使用权限「${permission}」。` };
+      }
+      const names = permissionPresets.names || [];
+      if (!names.includes(permission)) {
+        return { ok: false, error: `权限「${permission}」不存在（可用：${names.join('、') || '无'}）。` };
+      }
+    }
+
+    if (provider && model) {
+      const llm = getService(ctx, 'llm');
+      if (llm && typeof llm.resolveModelInfo === 'function') {
+        try {
+          const info = await llm.resolveModelInfo(provider, model);
+          const effort = sessionChoiceText(input.reasoningEffort);
+          if (effort && info && info.reasoning && Array.isArray(info.reasoning.efforts)) {
+            const known = new Set(info.reasoning.efforts.map((item) => sessionChoiceText(item && item.id)).filter(Boolean));
+            if (!known.has(effort)) {
+              return { ok: false, error: `模型「${model}」不支持推理等级「${effort}」${known.size ? `（可用：${[...known].join('、')}）` : ''}。` };
+            }
+          }
+        } catch (error) {
+          // Model catalogs are advisory in dsh-llm; a resolver failure must not
+          // make the persisted config un-editable.
+          (ctx.logger || console).warn('[skill-gateway] model info validation skipped:', error);
+        }
+      }
+    }
+
+    return { ok: true };
+  }
+
   async function route(req, res) {
     try {
       const url = new URL(req.url, 'http://skill-gateway.invalid');
@@ -367,6 +572,34 @@ export function apply(ctx, config = {}) {
           return sendJson(res, 400, { ok: false, error: 'preview 需要上传文件夹 item.files。' });
         }
         return sendJson(res, 200, await service.previewUpload(scope, item, body.options || {}));
+      }
+
+      if (req.method === 'GET' && url.pathname === '/skill-gateway/session-config/options') {
+        return sendJson(res, 200, await buildSessionConfigOptions(ctx, cwd));
+      }
+
+      if (req.method === 'GET' && url.pathname === '/skill-gateway/session-config/models') {
+        const provider = String(url.searchParams.get('provider') || '').trim();
+        if (!provider) return sendJson(res, 400, { ok: false, error: '缺少 provider。' });
+        return sendJson(res, 200, await buildSessionModelOptions(ctx, provider));
+      }
+
+      if (req.method === 'GET' && url.pathname === '/skill-gateway/session-config/model-info') {
+        const provider = String(url.searchParams.get('provider') || '').trim();
+        const model = String(url.searchParams.get('model') || '').trim();
+        if (!provider || !model) return sendJson(res, 400, { ok: false, error: '缺少 provider 或 model。' });
+        return sendJson(res, 200, await buildSessionModelInfo(ctx, provider, model));
+      }
+
+      if (req.method === 'POST' && url.pathname === '/skill-gateway/session-config') {
+        const body = await readBody(req);
+        const scope = body.cwd || cwd;
+        const input = body.session && typeof body.session === 'object' ? body.session : {};
+        const validation = await validateSessionConfig(ctx, input);
+        if (!validation.ok) return sendJson(res, 400, validation);
+        const result = await service.saveSessionConfig(scope, input);
+        await syncEnabled(scope);
+        return sendJson(res, 200, result);
       }
 
       if (req.method === 'POST' && url.pathname === '/skill-gateway/scenes/skills') {
@@ -459,6 +692,10 @@ export function apply(ctx, config = {}) {
     { kind: 'exact', path: '/skill-gateway/toggle', handler: route },
     { kind: 'exact', path: '/skill-gateway/scenes', handler: route },
     { kind: 'exact', path: '/skill-gateway/upload/preview', handler: route },
+    { kind: 'exact', path: '/skill-gateway/session-config', handler: route },
+    { kind: 'exact', path: '/skill-gateway/session-config/options', handler: route },
+    { kind: 'exact', path: '/skill-gateway/session-config/models', handler: route },
+    { kind: 'exact', path: '/skill-gateway/session-config/model-info', handler: route },
     { kind: 'exact', path: '/skill-gateway/skills/files', handler: route },
     { kind: 'exact', path: '/skill-gateway/scenes/skills', handler: route },
     { kind: 'exact', path: '/skill-gateway/upload', handler: route },

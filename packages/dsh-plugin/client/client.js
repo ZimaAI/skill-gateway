@@ -2,7 +2,7 @@
 //
 // Skill Gateway 侧边栏页面，按 prototype/version2 的 Skill Gateway 面板还原：
 // - 设计 token 与组件遵循 docs/style/deepseek/design.md
-// - 场景树 / 全部技能双视图、上传校验预览、技能文件预览、统计、网关 browse 演示
+// - 场景树 / 全部技能双视图、上传校验预览、技能文件预览、会话配置、统计、网关 browse 演示
 // - 支持拖拽调整侧边栏宽度
 // - 页面端不提供“加载全文”；完整技能内容由 Agent 通过 skill_gateway load 工具取用。
 
@@ -264,6 +264,10 @@ svg.sg-icon {
 .sg-panel-tabs .sg-segmented button {
   flex: 1;
   justify-content: center;
+  padding-left: 8px;
+  padding-right: 8px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .sg-panel-body {
@@ -2660,6 +2664,303 @@ details.sg-card[open] > summary {
     /* 统计 tab                                                             */
     /* ------------------------------------------------------------------ */
 
+    function sessionConfigForm(value) {
+      const source = value && typeof value === 'object' ? value : {};
+      const text = (key) => (typeof source[key] === 'string' ? source[key] : '');
+      return {
+        mode: text('mode').trim(),
+        provider: text('provider').trim(),
+        model: text('model').trim(),
+        reasoningEffort: text('reasoningEffort').trim(),
+        permission: text('permission').trim(),
+      };
+    }
+
+    function SessionConfigTab({ state, cwd, notify, onChanged }) {
+      const savedSession = (state.config && state.config.session) || {};
+      const [form, setForm] = useState(() => sessionConfigForm(savedSession));
+      const [options, setOptions] = useState(null);
+      const [optionsError, setOptionsError] = useState('');
+      const [models, setModels] = useState([]);
+      const [modelsLoading, setModelsLoading] = useState(false);
+      const [modelsError, setModelsError] = useState('');
+      const [modelInfo, setModelInfo] = useState(null);
+      const [infoLoading, setInfoLoading] = useState(false);
+      const [saving, setSaving] = useState(false);
+      const lastCwd = useRef('');
+
+      useEffect(() => {
+        if (lastCwd.current !== cwd) {
+          lastCwd.current = cwd;
+          setForm(sessionConfigForm(savedSession));
+          setOptions(null);
+          setModels([]);
+          setModelInfo(null);
+        }
+      }, [cwd, savedSession]);
+
+      useEffect(() => {
+        let cancelled = false;
+        setOptionsError('');
+        api('GET', withCwd('/skill-gateway/session-config/options', cwd))
+          .then((data) => {
+            if (cancelled) return;
+            setOptions(data);
+          })
+          .catch((err) => {
+            if (!cancelled) setOptionsError(err.message);
+          });
+        return () => {
+          cancelled = true;
+        };
+      }, [cwd]);
+
+      useEffect(() => {
+        const provider = form.provider.trim();
+        if (!provider) {
+          setModels([]);
+          setModelsError('');
+          setModelsLoading(false);
+          setModelInfo(null);
+          return undefined;
+        }
+        let cancelled = false;
+        setModelsLoading(true);
+        setModelsError('');
+        api('GET', withParams(withCwd('/skill-gateway/session-config/models', cwd), { provider }))
+          .then((data) => {
+            if (cancelled) return;
+            if (!data || data.ok === false) throw new Error((data && data.error) || '读取模型列表失败。');
+            setModels(Array.isArray(data.models) ? data.models : []);
+            setModelsLoading(false);
+          })
+          .catch((err) => {
+            if (cancelled) return;
+            setModels([]);
+            setModelsError(err.message);
+            setModelsLoading(false);
+          });
+        return () => {
+          cancelled = true;
+        };
+      }, [cwd, form.provider]);
+
+      useEffect(() => {
+        const provider = form.provider.trim();
+        const model = form.model.trim();
+        if (!provider || !model) {
+          setModelInfo(null);
+          setInfoLoading(false);
+          return undefined;
+        }
+        let cancelled = false;
+        setInfoLoading(true);
+        api('GET', withParams(withCwd('/skill-gateway/session-config/model-info', cwd), { provider, model }))
+          .then((data) => {
+            if (cancelled) return;
+            if (!data || data.ok === false) throw new Error((data && data.error) || '读取模型推理等级失败。');
+            setModelInfo(data);
+            setInfoLoading(false);
+          })
+          .catch(() => {
+            if (cancelled) return;
+            setModelInfo(null);
+            setInfoLoading(false);
+          });
+        return () => {
+          cancelled = true;
+        };
+      }, [cwd, form.provider, form.model]);
+
+      const update = (key, value) => {
+        setForm((prev) => {
+          const next = { ...prev, [key]: String(value || '').trim() };
+          if (key === 'provider') {
+            next.model = '';
+            next.reasoningEffort = '';
+          } else if (key === 'model') {
+            next.reasoningEffort = '';
+          }
+          return next;
+        });
+      };
+
+      const save = async () => {
+        if (Boolean(form.provider.trim()) !== Boolean(form.model.trim())) {
+          notify('模型与提供方必须同时填写，或同时留空以跟随部署默认。', 'danger');
+          return;
+        }
+        setSaving(true);
+        try {
+          const result = await api('POST', withCwd('/skill-gateway/session-config', cwd), { cwd, session: form });
+          setForm(sessionConfigForm(result.session));
+          notify('会话配置已保存：上传、一键整理、冲突检测创建的工作区会话将使用该配置。', 'success', 6000);
+          if (onChanged) await onChanged();
+        } catch (err) {
+          notify(err.message, 'danger', 6000);
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      const reset = () => {
+        setForm(sessionConfigForm(savedSession));
+        setModelInfo(null);
+      };
+
+      const modeOptions = (options && options.modes) || [];
+      const permissionOptions = (options && options.permissions) || [];
+      const providerOptions = (options && options.providers) || [];
+      const efforts = modelInfo && modelInfo.reasoning && Array.isArray(modelInfo.reasoning.efforts)
+        ? [...modelInfo.reasoning.efforts]
+        : [];
+      const modelChoices = [...models];
+      const modeChoices = [...modeOptions];
+      const permissionChoices = [...permissionOptions];
+      const providerChoices = [...providerOptions];
+      if (form.model && !modelChoices.some((item) => item.id === form.model)) {
+        modelChoices.push({ id: form.model, name: form.model, description: '' });
+      }
+      if (form.mode && !modeChoices.some((item) => item.id === form.mode)) {
+        modeChoices.push({ id: form.mode, name: form.mode, description: '', broken: '' });
+      }
+      if (form.provider && !providerChoices.some((item) => item.id === form.provider)) {
+        providerChoices.push({ id: form.provider, name: form.provider });
+      }
+      if (form.permission && !permissionChoices.some((item) => item.id === form.permission)) {
+        permissionChoices.push({ id: form.permission, name: form.permission, description: '' });
+      }
+      if (form.reasoningEffort && !efforts.some((item) => item.id === form.reasoningEffort)) {
+        efforts.push({ id: form.reasoningEffort, name: form.reasoningEffort, description: '' });
+      }
+
+      const defaultModeName = modeChoices.find((item) => item.id === options.defaultMode);
+      const defaultModeLabel = defaultModeName ? defaultModeName.name : options.defaultMode;
+      const defaultPermissionName = permissionChoices.find((item) => item.id === options.defaultPermission);
+      const defaultPermissionLabel = defaultPermissionName ? defaultPermissionName.name : options.defaultPermission;
+      const currentModelLabel = options.currentModel
+        ? `${options.currentModel.provider} / ${options.currentModel.model}`
+        : '';
+
+      const fieldBlock = h('div', null,
+        h('div', { className: 'sg-field' },
+          h('label', { className: 'sg-field-label', htmlFor: 'sg-session-mode' }, '模式（Agent 预设）'),
+          h('select', {
+            id: 'sg-session-mode',
+            value: form.mode,
+            onChange: (event) => update('mode', event.target.value),
+          },
+            h('option', { value: '' }, `跟随部署默认${defaultModeLabel ? `（${defaultModeLabel}）` : ''}`),
+            modeChoices.map((item) => h('option', {
+              key: item.id,
+              value: item.id,
+              disabled: Boolean(item.broken),
+            }, `${item.name}${item.broken ? `（不可用：${item.broken}）` : ''}`))),
+          h('p', { className: 'sg-field-hint' },
+            modeOptions.length
+              ? '整理会话会挂载所选模式对应的工具、提示词与能力。'
+              : '宿主未提供 Agent 预设服务；留空时使用部署当前组合。')),
+        h('div', { className: 'sg-field' },
+          h('label', { className: 'sg-field-label', htmlFor: 'sg-session-provider' }, '模型提供方'),
+          h('select', {
+            id: 'sg-session-provider',
+            value: form.provider,
+            onChange: (event) => update('provider', event.target.value),
+          },
+            h('option', { value: '' }, currentModelLabel
+              ? `跟随部署默认（${currentModelLabel}）`
+              : '跟随部署默认'),
+            providerChoices.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id))),
+          h('p', { className: 'sg-field-hint' },
+            providerOptions.length
+              ? '选择提供方后可继续选择该提供方下的模型。'
+              : '宿主未提供模型目录；可留空跟随部署默认模型。')),
+        h('div', { className: 'sg-field' },
+          h('label', { className: 'sg-field-label', htmlFor: 'sg-session-model' }, '模型'),
+          h('select', {
+            id: 'sg-session-model',
+            value: form.model,
+            disabled: !form.provider || modelsLoading || Boolean(modelsError),
+            onChange: (event) => update('model', event.target.value),
+          },
+            h('option', { value: '' }, form.provider
+              ? (modelsLoading ? '加载模型中…' : '跟随提供方默认模型')
+              : '请先选择模型提供方'),
+            modelChoices.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id))),
+          modelsError ? h('p', { className: 'sg-field-error' }, modelsError) : null,
+          h('p', { className: 'sg-field-hint' }, '留空提供方与模型时，整理会话使用部署当前默认模型。')),
+        h('div', { className: 'sg-field' },
+          h('label', { className: 'sg-field-label', htmlFor: 'sg-session-effort' }, '模型推理等级'),
+          h('select', {
+            id: 'sg-session-effort',
+            value: form.reasoningEffort,
+            disabled: !form.model || infoLoading || !efforts.length,
+            onChange: (event) => update('reasoningEffort', event.target.value),
+          },
+            h('option', { value: '' }, modelInfo && modelInfo.reasoning && modelInfo.reasoning.defaultEffort
+              ? `使用模型默认（${modelInfo.reasoning.defaultEffort}）`
+              : '使用模型/提供方默认'),
+            efforts.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id))),
+          h('p', { className: 'sg-field-hint' },
+            form.model
+              ? (infoLoading
+                  ? '正在读取模型推理等级…'
+                  : (efforts.length
+                      ? '选择模型支持的推理等级；留空使用模型默认。'
+                      : '该模型未提供可选推理等级，留空使用提供方默认。'))
+              : '选择模型后可配置推理等级。')),
+        h('div', { className: 'sg-field' },
+          h('label', { className: 'sg-field-label', htmlFor: 'sg-session-permission' }, '权限'),
+          h('select', {
+            id: 'sg-session-permission',
+            value: form.permission,
+            onChange: (event) => update('permission', event.target.value),
+          },
+            h('option', { value: '' }, `跟随部署默认${defaultPermissionLabel ? `（${defaultPermissionLabel}）` : ''}`),
+            permissionChoices.map((item) => h('option', { key: item.id, value: item.id }, item.name || item.id))),
+          permissionOptions.map((item) => (item.description
+            ? h('p', { className: 'sg-field-hint', key: `permission-hint-${item.id}` }, `${item.name}：${item.description}`)
+            : null)),
+          h('p', { className: 'sg-field-hint' },
+            permissionOptions.length
+              ? '权限预设同时决定会话的沙箱模式与审批策略。'
+              : '宿主未提供权限预设服务；留空时由部署默认策略决定。')),
+        h('div', { className: 'sg-upload-result-actions' },
+          h('button', {
+            className: 'sg-btn sg-btn-primary',
+            type: 'button',
+            disabled: saving,
+            onClick: save,
+          }, saving ? '保存中…' : '保存会话配置'),
+          h('button', {
+            className: 'sg-btn sg-btn-ghost',
+            type: 'button',
+            disabled: saving,
+            onClick: reset,
+          }, '撤销修改'),
+          optionsError
+            ? h('span', {
+                style: { fontSize: 12, color: 'var(--sg-danger)', alignSelf: 'center' },
+              }, optionsError)
+            : null));
+
+      return h('div', { className: 'sg-panel-section' },
+        h('div', { className: 'sg-section-head' },
+          h('div', null,
+            h('h2', { className: 'sg-section-title' }, '会话配置'),
+            h('p', { className: 'sg-section-sub' }, '配置由上传、一键整理、冲突检测创建的工作区会话。'))),
+        h('div', { className: 'sg-notice sg-info' },
+          h(Icon, { name: 'info' }),
+          h('span', null, '上传成功后自动开启的「技能分类」会话，以及手动触发的「一键整理」「冲突检测」会话，都会按这里保存的配置创建。')),
+        !options
+          ? h('div', { className: 'sg-card' },
+              h('div', { className: 'sg-empty' },
+                h('div', { className: 'sg-empty-icon' }, h(Icon, { name: 'refresh' })),
+                h('h3', { className: 'sg-empty-title' }, optionsError ? '加载会话配置选项失败' : '加载中…'),
+                optionsError ? h('p', { className: 'sg-empty-desc' }, optionsError) : null))
+          : h('div', { className: 'sg-card' }, fieldBlock));
+    }
+
     function StatsTab({ cwd, sessionId, setTab, active }) {
       const [source, setSource] = useState('all');
       const [stats, setStats] = useState(null);
@@ -3978,8 +4279,9 @@ details.sg-card[open] > summary {
       };
 
       const tabDefs = [
-        ['catalog', '场景树管理', 'layers'],
+        ['catalog', '场景树', 'layers'],
         ['organize', '整理', 'refresh'],
+        ['session', '会话配置', 'panel'],
         ['stats', '统计', 'stats'],
         ['gateway', '网关取用', 'gateway'],
       ];
@@ -4059,6 +4361,10 @@ details.sg-card[open] > summary {
             state
               ? h('div', { style: { display: tab === 'organize' ? 'block' : 'none' } },
                   h(OrganizeTab, { state, cwd, onChanged: refresh, notify, setModal, onOpenSession: props.onOpenSession }))
+              : null,
+            state
+              ? h('div', { style: { display: tab === 'session' ? 'block' : 'none' } },
+                  h(SessionConfigTab, { state, cwd, notify, onChanged: refresh }))
               : null,
             state
               ? h('div', { style: { display: tab === 'stats' ? 'block' : 'none' } },

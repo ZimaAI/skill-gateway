@@ -37,6 +37,35 @@ dsh plugin add skill-gateway-dsh
 
 预览：`POST /skill-gateway/upload/preview`。
 
+## 会话配置
+
+会话配置按工作区持久化在 `config.json` 的 `session` 字段中：
+
+```json
+{
+  "enabled": true,
+  "session": {
+    "mode": "standard",
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "reasoningEffort": "high",
+    "permission": "workspace-write"
+  }
+}
+```
+
+四个字段留空均表示“跟随部署默认”。`mode` 是 Agent 预设 id（标准 / PTC /
+极简 / 创造等模式）；`provider` 与 `model` 必须同时填写或同时留空；
+`reasoningEffort` 是模型适配器提供的推理等级 id；`permission` 是权限预设 id
+（同时决定沙箱模式与审批策略）。
+
+HTTP 路由：
+
+- `GET /skill-gateway/session-config/options`：读取可选的模式 / 权限 / 模型提供方选项与当前默认模型；
+- `GET /skill-gateway/session-config/models?provider=...`：读取提供方模型列表；
+- `GET /skill-gateway/session-config/model-info?provider=...&model=...`：读取模型可选推理等级；
+- `POST /skill-gateway/session-config` `{ cwd?, session }`：保存并校验工作区会话配置。
+
 ## 整理会话
 
 - `POST /skill-gateway/organize/trigger` `{ mode: 'full' | 'detect' }`：一键整理 /
@@ -60,6 +89,9 @@ dsh plugin add skill-gateway-dsh
 - 统计：会话时间线与仓库级按技能 / 按场景聚合，支持 gateway / agent-skills 来源过滤。
 - 网关取用：逐层 browse 演示；按需求管理页不提供“加载全文”，
   技能全文仍由 Agent 通过 `skill_gateway(action: "load")` 取用。
+- 会话配置：为当前工作区配置整理会话采用的 Agent 模式（预设）、模型提供方 /
+  模型、模型推理等级与权限预设。保存后，上传成功后自动开启的技能分类会话、
+  一键整理与冲突检测会话都按该配置创建；留空字段表示跟随部署默认。
 - 侧边栏左边缘可拖拽调整宽度（360px ~ 760px），双击恢复 440px；宽度会保存在浏览器本地。
 
 ## 数据落点
@@ -69,7 +101,7 @@ dsh plugin add skill-gateway-dsh
 ```
 catalog.json            # 场景树 + 技能元数据
 usage.json              # 会话内/跨会话使用记录
-config.json             # { enabled: true }
+config.json             # { enabled: true, session: { mode, provider, model, reasoningEffort, permission } }
 organize-report.json    # 最近一份整理报告
 snapshots/upload.json   # 上传槽位快照（catalog + 批次清单）
 snapshots/organize.json # 整理槽位快照（catalog）

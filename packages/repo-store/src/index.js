@@ -21,6 +21,14 @@ export const DEFAULT_DATA_DIRNAME = '.skillgate';
 export const ANCHOR_FILENAME = '.skillgate-anchor';
 export const LOCK_FILENAME = '.write.lock';
 export const SNAPSHOT_SLOTS = Object.freeze(['upload', 'organize']);
+export const SESSION_CONFIG_KEYS = Object.freeze(['mode', 'provider', 'model', 'reasoningEffort', 'permission']);
+export const DEFAULT_SESSION_CONFIG = Object.freeze({
+  mode: '',
+  provider: '',
+  model: '',
+  reasoningEffort: '',
+  permission: '',
+});
 const SNAPSHOT_LABELS = { upload: '上传', organize: '整理' };
 const LOCK_STALE_MS = 15_000;
 
@@ -106,6 +114,20 @@ function assertSnapshotSlot(slot) {
     throw new Error(`非法快照槽位：${slot}（可用：${SNAPSHOT_SLOTS.join('、')}）。`);
   }
   return slot;
+}
+
+/**
+ * Normalize the repository's workspace-level session defaults. Empty string
+ * means “follow the deployment/host default” for that field; only these five
+ * fields are persisted and unknown keys are dropped.
+ */
+export function normalizeSessionConfig(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const next = {};
+  for (const key of SESSION_CONFIG_KEYS) {
+    next[key] = typeof source[key] === 'string' ? source[key].trim() : '';
+  }
+  return next;
 }
 
 function snapshotPath(dataDir, slot) {
@@ -236,7 +258,10 @@ export class RepoStore {
     return this._enqueue(async () => {
       const dataDir = await this.dataDir();
       const config = await readJsonFile(path.join(dataDir, 'config.json'), { enabled: true });
-      return { enabled: config.enabled !== false };
+      return {
+        enabled: config.enabled !== false,
+        session: normalizeSessionConfig(config.session),
+      };
     });
   }
 
@@ -244,8 +269,20 @@ export class RepoStore {
     return this._enqueue(async () => {
       const dataDir = await this.dataDir();
       return this._withLock(dataDir, async () => {
-        const next = { enabled: !config || config.enabled !== false };
-        await writeJsonFile(path.join(dataDir, 'config.json'), next);
+        const file = path.join(dataDir, 'config.json');
+        const current = await readJsonFile(file, { enabled: true });
+        // Partial writes merge with the persisted record: an enabled-only
+        // write (gateway toggle) must not wipe session defaults, and a
+        // session-only write must not flip the gateway back on/off. Passing
+        // a field explicitly still replaces it (`session: null` clears it).
+        const object = config && typeof config === 'object' ? config : {};
+        const hasEnabled = Object.prototype.hasOwnProperty.call(object, 'enabled');
+        const hasSession = Object.prototype.hasOwnProperty.call(object, 'session');
+        const next = {
+          enabled: hasEnabled ? object.enabled !== false : current.enabled !== false,
+          session: normalizeSessionConfig(hasSession ? object.session : current.session),
+        };
+        await writeJsonFile(file, next);
         return next;
       });
     });

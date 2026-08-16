@@ -18,7 +18,37 @@ test('service state initializes a catalog and toggle defaults to on', async (t) 
   assert.equal(state.ok, true);
   assert.equal(state.catalog.rootSceneId, 'root');
   assert.equal(state.config.enabled, true);
+  assert.deepEqual(state.config.session, {
+    mode: '',
+    provider: '',
+    model: '',
+    reasoningEffort: '',
+    permission: '',
+  });
   assert.equal(state.usage.length, 0);
+});
+
+test('service saves workspace session defaults and toggle preserves them', async (t) => {
+  const { service } = await tempService(t);
+  const saved = await service.saveSessionConfig(undefined, {
+    mode: 'code',
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    reasoningEffort: 'high',
+    permission: 'workspace-write',
+  });
+  assert.equal(saved.ok, true);
+  assert.equal(saved.session.mode, 'code');
+  assert.equal(saved.session.model, 'deepseek-chat');
+
+  const toggled = await service.setEnabled(undefined, false);
+  assert.equal(toggled.ok, true);
+  assert.equal(toggled.config.enabled, false);
+  assert.equal(toggled.config.session.mode, 'code');
+  assert.equal(toggled.config.session.reasoningEffort, 'high');
+
+  const reopened = await service.getSessionConfig(undefined);
+  assert.equal(reopened.permission, 'workspace-write');
 });
 
 test('service upload persists skills unclassified and reports added/overwritten/ignored', async (t) => {

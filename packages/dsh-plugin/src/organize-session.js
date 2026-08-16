@@ -16,6 +16,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { defineTool } from '@deepseek-ai/dsh-tools';
+import { installModelSelection } from '@deepseek-ai/dsh-agent';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import {
@@ -198,13 +199,36 @@ export class OrganizeController {
       return { ok: false, error: '宿主未提供 agents 服务，无法开启整理会话。' };
     }
 
+    // Resolve the workspace-level session configuration before publishing a
+    // run, so a bad mode/model/permission value fails the trigger instead of
+    // leaving an empty half-configured session in the sidebar.
+    let creation;
+    try {
+      creation = await this.resolveSessionCreation(ctx, config.session);
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      this.logger.warn('[skill-gateway] failed to resolve organize session config:', message);
+      return { ok: false, error: `解析会话配置失败：${message}` };
+    }
+    if (!creation.ok) return creation;
+
+    // Re-check after the async config resolution: another trigger may have won
+    // the mutex while this one was resolving. The check and `runs.set()` below
+    // are synchronous, so only one caller can pass.
+    if (this.isRunning(key)) {
+      return {
+        ok: false,
+        error: '已有整理会话正在运行，请等待它完成或先打断它，再触发新的整理。',
+      };
+    }
+
     const sessionId = SessionId(`skill-organize-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`);
     const startedAt = Date.now();
     const run = { sessionId, mode, startedAt, running: true, endedAt: null };
     this.runs.set(key, run);
 
     // Fire-and-forget: the run settles the mutex and persists the report.
-    this.runSession(ctx, key, run, agents, sessions, options).catch((error) => {
+    this.runSession(ctx, key, run, agents, sessions, options, creation).catch((error) => {
       this.logger.warn('[skill-gateway] organize run failed:', error);
       run.running = false;
       run.endedAt = Date.now();
@@ -213,8 +237,124 @@ export class OrganizeController {
     return { ok: true, sessionId, mode, startedAt };
   }
 
-  async runSession(ctx, key, run, agents, sessions, options) {
+  /**
+   * Resolve `config.session` into concrete `agents.create()` inputs.
+   * Priority: workspace session config → plugin-level `preset` → deployment
+   * default model / default agent preset / default permission preset.
+   */
+  async resolveSessionCreation(ctx, sessionConfig = {}) {
+    const configured = sessionConfig && typeof sessionConfig === 'object' ? sessionConfig : {};
+    const configuredMode = firstString(configured.mode);
+    const configuredProvider = firstString(configured.provider);
+    const configuredModel = firstString(configured.model);
+    const configuredEffort = firstString(configured.reasoningEffort);
+    const configuredPermission = firstString(configured.permission);
+
+    if (Boolean(configuredProvider) !== Boolean(configuredModel)) {
+      return { ok: false, error: '会话配置中的模型与提供方必须同时填写，或同时留空以跟随部署默认。' };
+    }
+
+    const defaultModel = getService(ctx, 'agentDefaultModel');
+    let defaultSelection = null;
+    try {
+      defaultSelection = defaultModel && typeof defaultModel.currentSelection === 'function'
+        ? defaultModel.currentSelection()
+        : null;
+    } catch {
+      defaultSelection = null;
+    }
+
+    let selection = defaultSelection;
+    if (configuredProvider) {
+      selection = {
+        provider: configuredProvider,
+        model: configuredModel,
+        ...(configuredEffort ? { reasoningEffort: configuredEffort } : {}),
+      };
+    } else if (selection && (!selection.provider || !selection.model)) {
+      selection = null;
+    }
+
+    // Reasoning identifiers are adapter-owned. Validate an explicitly chosen
+    // effort when the host can resolve the model, but never treat a failed
+    // catalog lookup as a reason to block session creation: dsh-llm catalogs
+    // are advisory and adapters may accept unlisted dynamic models.
+    if (selection && selection.reasoningEffort) {
+      const llm = getService(ctx, 'llm');
+      if (llm && typeof llm.resolveModelInfo === 'function') {
+        try {
+          const info = await llm.resolveModelInfo(selection.provider, selection.model);
+          const efforts = info && info.reasoning ? (info.reasoning.efforts || []) : [];
+          const known = new Set(efforts.map((item) => firstString(item && item.id)).filter(Boolean));
+          if (known.size && !known.has(selection.reasoningEffort)) {
+            return { ok: false, error: `模型「${selection.model}」不支持推理等级「${selection.reasoningEffort}」（可用：${[...known].join('、')}）。` };
+          }
+        } catch (error) {
+          this.logger.warn('[skill-gateway] model reasoning validation skipped:', error && error.message ? error.message : error);
+        }
+      }
+    }
+
+    const presetsService = getService(ctx, 'agentPresets');
+    let presetId = configuredMode || firstString(this.preset) || undefined;
+    if (presetId) {
+      if (!presetsService || typeof presetsService.resolve !== 'function') {
+        return { ok: false, error: `会话配置要求使用 Agent 模式「${presetId}」，但宿主未提供 agentPresets 服务。` };
+      }
+      try {
+        const resolved = await presetsService.resolve(presetId);
+        presetId = firstString(resolved && resolved.id) || presetId;
+        if (resolved && resolved.broken) {
+          return { ok: false, error: `Agent 模式「${presetId}」不可用：${resolved.broken}` };
+        }
+      } catch (error) {
+        return { ok: false, error: `无法使用 Agent 模式「${presetId}」：${error && error.message ? error.message : String(error)}` };
+      }
+    } else if (presetsService && presetsService.defaultId) {
+      presetId = presetsService.defaultId;
+      if (typeof presetsService.resolve === 'function') {
+        try {
+          const resolved = await presetsService.resolve(presetId);
+          presetId = firstString(resolved && resolved.id) || presetId;
+          if (resolved && resolved.broken) {
+            return { ok: false, error: `部署默认 Agent 模式「${presetId}」不可用：${resolved.broken}` };
+          }
+        } catch (error) {
+          return { ok: false, error: `无法使用部署默认 Agent 模式「${presetId}」：${error && error.message ? error.message : String(error)}` };
+        }
+      }
+    }
+
+    const permissionPresets = getService(ctx, 'permissionPresets');
+    if (configuredPermission) {
+      if (!permissionPresets || typeof permissionPresets.set !== 'function') {
+        return { ok: false, error: `会话配置要求使用权限「${configuredPermission}」，但宿主未提供权限预设服务。` };
+      }
+      const names = permissionPresets.names || [];
+      if (!names.includes(configuredPermission)) {
+        return { ok: false, error: `会话配置中的权限「${configuredPermission}」不存在（可用：${names.join('、') || '无'}）。` };
+      }
+    }
+
+    return {
+      ok: true,
+      presetId: presetId || undefined,
+      selection: selection || undefined,
+      permission: configuredPermission || undefined,
+      permissionPresets: configuredPermission ? permissionPresets : undefined,
+      session: {
+        mode: presetId || '',
+        provider: selection ? selection.provider : '',
+        model: selection ? selection.model : '',
+        reasoningEffort: selection ? (selection.reasoningEffort || '') : '',
+        permission: configuredPermission,
+      },
+    };
+  }
+
+  async runSession(ctx, key, run, agents, sessions, options, creation = {}) {
     const { sessionId, mode } = run;
+    const { presetId, selection, permission, permissionPresets } = creation;
 
     // Snapshot before the session starts so the run is rollback-able.
     // Detect mode is read-only: no snapshot, no tree changes.
@@ -234,39 +374,36 @@ export class OrganizeController {
 
     let agent;
     try {
-      const defaultModel = getService(ctx, 'agentDefaultModel');
-      let agentOptions;
-      try {
-        const selection = defaultModel && typeof defaultModel.currentSelection === 'function'
-          ? defaultModel.currentSelection()
-          : null;
-        if (selection && selection.provider && selection.model) {
-          agentOptions = { provider: selection.provider, model: selection.model };
-        }
-      } catch {
-        // Fall back to the deployment default model.
-      }
-
-      const presetsService = getService(ctx, 'agentPresets');
-      const presetId = this.preset || (presetsService && presetsService.defaultId) || undefined;
-
       const handle = await agents.create({
         sessionId,
         meta: {
           cwd: key,
           ...(presetId ? { agentPreset: presetId } : {}),
         },
-        agentOptions,
+        ...(selection ? { agentOptions: { provider: selection.provider, model: selection.model } } : {}),
         setup: async (agentCtx) => {
-          if (presetId && agentCtx && agentCtx.tools) {
-            const presets = getService(agentCtx, 'agentPresets');
-            if (presets && typeof presets.mount === 'function') {
-              try {
-                await presets.mount(agentCtx, presetId);
-              } catch (error) {
-                this.logger.warn('[skill-gateway] preset mount failed, continuing without it:', error);
-              }
+          if (presetId) {
+            const presets = getService(agentCtx, 'agentPresets') || getService(ctx, 'agentPresets');
+            if (!presets || typeof presets.mount !== 'function') {
+              throw new Error(`宿主未提供 agentPresets 服务，无法挂载 Agent 模式「${presetId}」。`);
             }
+            await presets.mount(agentCtx, presetId);
+          }
+          if (selection) {
+            installModelSelection(agentCtx, {
+              current: selection,
+              assembled: undefined,
+            });
+          }
+          // Apply the workspace permission choice while the session is still
+          // unpublished. `session/created` then sees the durable preset and
+          // keeps it instead of pinning the deployment default on top.
+          if (permissionPresets && permission) {
+            const session = agentCtx && agentCtx.agent && agentCtx.agent.session;
+            if (!session) {
+              throw new Error('整理会话创建上下文中缺少 agent.session，无法应用权限配置。');
+            }
+            permissionPresets.set(session, permission);
           }
           agentCtx.tools.register(mode === 'detect' ? this.readOnlyTool : this.tool);
         },
@@ -306,7 +443,7 @@ export class OrganizeController {
     run.running = false;
     run.endedAt = Date.now();
 
-    const report = await this.buildReport(key, run, preCatalog, agent, options);
+    const report = await this.buildReport(key, run, preCatalog, agent, { ...options, session: creation.session || null });
     try {
       await this.service.saveOrganizeReport(key, report);
     } catch (error) {
@@ -345,6 +482,7 @@ export class OrganizeController {
       sessionId: run.sessionId,
       startedAt: run.startedAt,
       endedAt: run.endedAt,
+      session: options.session || null,
       changes,
       conflicts: parsed ? parsed.conflicts : [],
       duplicates: parsed ? parsed.duplicates : [],

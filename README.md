@@ -62,6 +62,8 @@ npm test
 
 **组织工具**：整理会话中的 Agent 通过 `skill_organize` 工具修改场景树（createScene / updateScene / deleteScene / moveScene / attachSkill / detachSkill），技能文件与技能描述只读，技能删除仅用户可操作。同一仓库同一时间只允许一个整理会话。
 
+**会话配置**：侧边栏「会话配置」可为当前工作区配置上传 / 一键整理 / 冲突检测所创建会话的 Agent 模式（预设）、模型提供方与模型、模型推理等级、权限预设；留空字段跟随部署默认。配置持久化在 `config.json` 的 `session` 字段，且关闭 / 开启网关不会重置该配置。
+
 ## 数据落点
 
 默认 `<工作目录根>/.skillgate/`：
@@ -69,7 +71,7 @@ npm test
 ```
 catalog.json            # 单根场景树 + 技能元数据
 usage.json              # { skillName, source, scenePath?, timestamp, sessionId }
-config.json             # { enabled: true }
+config.json             # { enabled: true, session: { mode, provider, model, reasoningEffort, permission } }
 organize-report.json    # 最近一份整理报告
 snapshots/              # 上传/整理两个回滚槽位（含被覆盖技能原文件备份）
 skills/<skill-name>/    # 一个文件夹 = 一个技能
