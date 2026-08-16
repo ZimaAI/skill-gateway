@@ -345,6 +345,24 @@ export function apply(ctx, config = {}) {
         return sendJson(res, 400, { ok: false, error: '未知 action。' });
       }
 
+      // 管理页文件预览专用：只读文件、不记录 usage；Agent 的全文取用仍走 /skill-gateway/call load。
+      if (req.method === 'GET' && url.pathname === '/skill-gateway/skills/files') {
+        const skillName = String(url.searchParams.get('skillName') || '').trim();
+        if (!skillName) return sendJson(res, 400, { ok: false, error: '缺少 skillName。' });
+        return sendJson(res, 200, await service.previewSkillFiles(cwd, skillName));
+      }
+
+      if (req.method === 'POST' && url.pathname === '/skill-gateway/scene-tree/preview') {
+        const body = await readBody(req);
+        const scope = body.cwd || cwd;
+        let item = body.item || (body.files ? { name: body.name, files: body.files } : null);
+        if (Array.isArray(item)) item = { name: body.name, files: item };
+        if (!item || !Array.isArray(item.files)) {
+          return sendJson(res, 400, { ok: false, error: 'preview 需要场景树文件夹 item.files。' });
+        }
+        return sendJson(res, 200, await service.previewSceneTree(scope, item, body.options || {}));
+      }
+
       if (req.method === 'POST' && url.pathname === '/skill-gateway/scenes/skills') {
         const body = await readBody(req);
         const scope = body.cwd || cwd;
@@ -396,6 +414,8 @@ export function apply(ctx, config = {}) {
     { kind: 'exact', path: '/skill-gateway/stats', handler: route },
     { kind: 'exact', path: '/skill-gateway/toggle', handler: route },
     { kind: 'exact', path: '/skill-gateway/scenes', handler: route },
+    { kind: 'exact', path: '/skill-gateway/scene-tree/preview', handler: route },
+    { kind: 'exact', path: '/skill-gateway/skills/files', handler: route },
     { kind: 'exact', path: '/skill-gateway/scenes/skills', handler: route },
     { kind: 'exact', path: '/skill-gateway/upload', handler: route },
     { kind: 'exact', path: '/skill-gateway/scene-tree/upload', handler: route },

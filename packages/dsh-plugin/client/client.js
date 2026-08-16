@@ -1,9 +1,10 @@
 // skill-gateway client half.
 //
-// Registers a frame-level shell.overlay entry: a right-edge toggle opens a
-// sliding Skill Gateway sidebar modelled after prototype/index.html. The panel
-// owns three tabs (场景树管理 / 统计 / 网关) and talks to the host routes
-// registered by src/host.js.
+// Skill Gateway 侧边栏页面，按 prototype/version2 的 Skill Gateway 面板还原：
+// - 设计 token 与组件遵循 docs/style/deepseek/design.md
+// - 场景树 / 全部技能双视图、上传校验预览、技能文件预览、统计、网关 browse 演示
+// - 支持拖拽调整侧边栏宽度
+// - 页面端不提供“加载全文”；完整技能内容由 Agent 通过 skill_gateway load 工具取用。
 
 window.__ModuleLoader__.load({
   id: 'skill-gateway-dsh',
@@ -13,71 +14,73 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
 
     const React = require('react');
-    const { useState, useEffect, useMemo, useCallback } = React;
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
     const name = 'skill-gateway-dsh';
     const inject = ['slots'];
     const identity = (state) => state;
     const h = React.createElement;
 
-    const CSS = `
-.sg-root, .sg-root *, .sg-fab, .sg-fab *, .sg-panel, .sg-panel * { box-sizing: border-box; }
-:root, .sg-root {
-  --sg-bg: #E7EDE9;
-  --sg-bg-soft: #EDF2EE;
-  --sg-surface: #F6F8F6;
-  --sg-surface-2: #FCFDFC;
-  --sg-ink: #17251F;
-  --sg-ink-2: #3D4E47;
-  --sg-muted: #5D6E66;
-  --sg-faint: #63736B;
-  --sg-line: #D3DDD7;
-  --sg-line-strong: #B8C6BF;
-  --sg-accent: #2F6B56;
-  --sg-accent-hover: #245542;
-  --sg-accent-soft: #DCEAE3;
-  --sg-on-accent: #F2F9F5;
-  --sg-danger: #AE4932;
-  --sg-danger-soft: #F7E5DE;
-  --sg-on-danger: #FFF6F3;
-  --sg-warning: #8A631B;
-  --sg-warning-soft: #F4EBD2;
-  --sg-agent: #4C5B55;
-  --sg-agent-soft: #E5EAE7;
-  --sg-radius: 8px;
-  --sg-shadow: 0 18px 40px rgba(0,0,0,.24);
-  --sg-font: "Avenir Next","Segoe UI Variable","Segoe UI","Helvetica Neue","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
-  --sg-mono: "Cascadia Code","SF Mono","JetBrains Mono","Fira Code",Menlo,Consolas,"Liberation Mono",monospace;
+    const CSS = `/* Skill Gateway DSH 页面样式 · docs/style/deepseek/design.md */
+.sg-root, .sg-root *, .sg-modal-root, .sg-modal-root *, .sg-toast-root, .sg-toast-root * { box-sizing: border-box; }
+.sg-root, .sg-modal-root, .sg-toast-root {
+  color-scheme: light;
+  --sg-primary: #165DFF;
+  --sg-primary-soft: #E8F3FF;
+  --sg-primary-soft-hover: #D4E4FF;
+  --sg-primary-gradient: linear-gradient(135deg, #7B9CFF 0%, #9DB8FF 100%);
+  --sg-success: #00B42A;
+  --sg-success-soft: #E8FFEA;
+  --sg-warning: #FF7D00;
+  --sg-warning-soft: #FFF3E8;
+  --sg-danger: #F53F3F;
+  --sg-danger-soft: #FFECE8;
+  --sg-bg: #FFFFFF;
+  --sg-bg-secondary: #F7F8FA;
+  --sg-bg-hover: #F2F3F5;
+  --sg-ink-1: #1D2129;
+  --sg-ink-2: #4E5969;
+  --sg-ink-3: #86909C;
+  --sg-ink-4: #C9CDD4;
+  --sg-line: #E5E6EB;
+  --sg-line-soft: #F2F3F5;
+  --sg-r-sm: 8px;
+  --sg-r-md: 12px;
+  --sg-r-lg: 16px;
+  --sg-r-full: 999px;
+  --sg-shadow-float: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --sg-shadow-normal: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --sg-shadow-focus: 0 0 0 3px rgba(22, 93, 255, 0.08);
+  --sg-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --sg-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --sg-unit: 4px;
+  --sg-panel-w: 440px;
 }
-@media (prefers-color-scheme: dark) {
-  :root, .sg-root {
-    --sg-bg: #101815;
-    --sg-bg-soft: #131F1A;
-    --sg-surface: #16211D;
-    --sg-surface-2: #1B2823;
-    --sg-ink: #E9F0EC;
-    --sg-ink-2: #C2CEC8;
-    --sg-muted: #91A098;
-    --sg-faint: #7E9087;
-    --sg-line: #2A3933;
-    --sg-line-strong: #3A4D45;
-    --sg-accent: #55AD86;
-    --sg-accent-hover: #6DBD98;
-    --sg-accent-soft: #1B352A;
-    --sg-on-accent: #0B1C14;
-    --sg-danger: #E18364;
-    --sg-danger-soft: #3A221B;
-    --sg-on-danger: #26130D;
-    --sg-warning: #D8AE58;
-    --sg-warning-soft: #342A16;
-    --sg-agent: #A9B6AF;
-    --sg-agent-soft: #202C27;
-  }
+.sg-root, .sg-modal-root, .sg-toast-root {
+  font-family: var(--sg-font-ui);
+  color: var(--sg-ink-1);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
-.sg-root {
-  font-family: var(--sg-font);
-  color: var(--sg-ink);
+.sg-root button, .sg-root input, .sg-root textarea, .sg-root select,
+.sg-modal-root button, .sg-modal-root input, .sg-modal-root textarea, .sg-modal-root select {
+  font: inherit;
+  color: inherit;
 }
-.sg-fab {
+.sg-root button, .sg-modal-root button { letter-spacing: 0.01em; }
+.sg-root button:focus-visible, .sg-root input:focus-visible, .sg-root textarea:focus-visible, .sg-root select:focus-visible,
+.sg-modal-root button:focus-visible, .sg-modal-root input:focus-visible, .sg-modal-root textarea:focus-visible, .sg-modal-root select:focus-visible {
+  outline: 2px solid var(--sg-primary);
+  outline-offset: 1px;
+}
+svg.sg-icon {
+  width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColor;
+  stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* 自定义：面板悬浮/宽度拖拽 */
+.sg-launcher {
   position: fixed;
   right: 0;
   top: 50%;
@@ -87,189 +90,1661 @@ window.__ModuleLoader__.load({
   align-items: center;
   gap: 7px;
   writing-mode: vertical-rl;
-  background: var(--sg-accent);
-  color: var(--sg-on-accent);
+  background: var(--sg-primary-gradient);
+  color: #fff;
   border: 0;
-  border-radius: 9px 0 0 9px;
-  padding: 12px 7px;
-  font: 600 12px/1.3 var(--sg-font);
+  border-radius: 12px 0 0 12px;
+  padding: 10px 7px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(0,0,0,.22);
-  letter-spacing: .04em;
+  box-shadow: var(--sg-shadow-float);
 }
-.sg-fab:hover { background: var(--sg-accent-hover); }
-.sg-fab .sg-fab-glyph { writing-mode: horizontal-tb; font-family: var(--sg-mono); font-size: 13px; }
+.sg-launcher:hover { filter: brightness(1.05); }
+.sg-launcher .sg-logo { writing-mode: horizontal-tb; width: 22px; height: 22px; }
 .sg-panel {
   position: fixed;
   top: 0; right: 0; bottom: 0;
-  width: min(720px, 100vw);
-  background: var(--sg-surface);
+  z-index: 1300;
+  background: var(--sg-bg);
   border-left: 1px solid var(--sg-line);
-  box-shadow: var(--sg-shadow);
+  box-shadow: var(--sg-shadow-float);
   display: flex;
   flex-direction: column;
   min-height: 0;
-  z-index: 1300;
-  animation: sg-panel-in .24s cubic-bezier(.16,1,.3,1);
+  min-width: 0;
+  animation: sg-panel-in 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
-@keyframes sg-panel-in { from { transform: translateX(40px); opacity: .6; } to { transform: translateX(0); opacity: 1; } }
-.sg-head {
-  display: flex; align-items: center; gap: 10px;
-  padding: 12px 16px; border-bottom: 1px solid var(--sg-line);
-  background: var(--sg-surface-2); flex: 0 0 auto;
+@keyframes sg-panel-in {
+  from { transform: translateX(40px); opacity: 0.6; }
+  to { transform: translateX(0); opacity: 1; }
 }
-.sg-kicker { font: 10px/1.4 var(--sg-mono); letter-spacing: .12em; color: var(--sg-muted); }
-.sg-title { font-size: 14px; font-weight: 700; margin: 0; }
-.sg-head-gap { flex: 1; }
-.sg-switch {
-  display: inline-flex; align-items: center; gap: 7px;
-  background: transparent; border: 0; cursor: pointer;
-  padding: 4px 6px; border-radius: var(--sg-radius); font: 12px/1 var(--sg-font); color: var(--sg-ink-2);
+.sg-panel.sg-panel-closed { display: none; }
+.sg-resizer {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  z-index: 20;
+  touch-action: none;
 }
-.sg-switch:hover { background: var(--sg-bg-soft); }
-.sg-switch .sg-track { width: 34px; height: 19px; border-radius: 999px; background: var(--sg-line-strong); position: relative; transition: background .2s ease; }
-.sg-switch .sg-knob { position: absolute; left: 2px; top: 2px; width: 15px; height: 15px; border-radius: 50%; background: var(--sg-surface-2); box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .2s ease; }
-.sg-switch[aria-checked="true"] .sg-track { background: var(--sg-accent); }
-.sg-switch[aria-checked="true"] .sg-knob { transform: translateX(15px); }
+.sg-resizer::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--sg-line);
+  transition: background 0.2s ease, width 0.2s ease;
+}
+.sg-resizer:hover::before, .sg-root.sg-is-resizing .sg-resizer::before {
+  left: 2px;
+  width: 3px;
+  background: var(--sg-primary);
+}
+.sg-root.sg-is-resizing { user-select: none; cursor: col-resize; }
+.sg-root.sg-is-resizing .sg-panel { transition: none; }
+.sg-logo { display: block; flex: 0 0 auto; }
+.sg-panel-mark {
+  display: grid;
+  place-items: center;
+  border-radius: var(--sg-r-sm);
+  flex: 0 0 auto;
+  color: #fff;
+}
+.sg-panel-mark .sg-logo { width: 28px; height: 28px; }
+.sg-mono {
+  font-family: var(--sg-font-mono);
+}
+
+.sg-hidden {
+  display: none !important;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Skill Gateway 侧边栏                                                      */
+/* ------------------------------------------------------------------------ */
+
+.sg-panel {
+  width: var(--sg-panel-w);
+  flex: 0 0 var(--sg-panel-w);
+  background: var(--sg-bg);
+  border-left: 1px solid var(--sg-line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.sg-panel-header {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--sg-line-soft);
+  flex: 0 0 auto;
+}
+
+.sg-panel-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--sg-r-sm);
+  background: var(--sg-primary-gradient);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.sg-panel-mark svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sg-panel-title-wrap {
+  min-width: 0;
+  flex: 1;
+}
+
+.sg-panel-title {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--sg-ink-1);
+  white-space: nowrap;
+}
+
+.sg-panel-subtitle {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sg-ink-3);
+  white-space: nowrap;
+}
+
 .sg-icon-btn {
-  width: 28px; height: 28px; display: grid; place-items: center;
-  background: transparent; border: 1px solid transparent; border-radius: var(--sg-radius);
-  cursor: pointer; color: var(--sg-muted); font-size: 17px;
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--sg-r-sm);
+  background: transparent;
+  color: var(--sg-ink-3);
+  cursor: pointer;
+  padding: 0;
 }
-.sg-icon-btn:hover { background: var(--sg-bg-soft); color: var(--sg-ink); }
-.sg-route { flex: 0 0 auto; padding: 12px 16px; border-bottom: 1px solid var(--sg-line); background: var(--sg-bg-soft); }
-.sg-lane { display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: center; font-size: 11px; }
-.sg-lane + .sg-lane { margin-top: 8px; }
-.sg-lane-label { font: 9px/1.3 var(--sg-mono); letter-spacing: .1em; color: var(--sg-muted); }
-.sg-track { display: flex; align-items: center; min-width: 0; gap: 0; }
-.sg-node { padding: 3px 7px; border: 1px solid var(--sg-line-strong); border-radius: 4px; background: var(--sg-surface-2); white-space: nowrap; color: var(--sg-ink-2); font-size: 11px; }
-.sg-wire { flex: 1; height: 1px; min-width: 12px; background: var(--sg-line-strong); }
-.sg-lane.sg-live .sg-wire { background: var(--sg-accent); }
-.sg-gate {
-  flex: 0 0 auto; width: 30px; height: 17px; border: 1px solid var(--sg-ink-2);
-  border-radius: 3px; position: relative; background: var(--sg-surface-2);
+
+.sg-icon-btn:hover {
+  background: var(--sg-bg-hover);
+  color: var(--sg-ink-1);
 }
-.sg-gate i { position: absolute; left: 4px; top: 8px; width: 20px; height: 2px; background: var(--sg-ink-2); transform-origin: left center; transform: rotate(-22deg); transition: transform .3s cubic-bezier(.16,1,.3,1), background .2s ease; }
-.sg-lane.sg-live .sg-gate { border-color: var(--sg-accent); }
-.sg-lane.sg-live .sg-gate i { background: var(--sg-accent); transform: rotate(0deg); }
-.sg-lane.sg-off { opacity: .46; }
-.sg-lane.sg-off .sg-node { text-decoration: line-through; text-decoration-thickness: 1px; }
-.sg-observer { display: flex; align-items: center; gap: 8px; margin-top: 9px; font: 9px/1.2 var(--sg-mono); letter-spacing: .1em; color: var(--sg-muted); }
-.sg-led { width: 6px; height: 6px; border-radius: 50%; background: var(--sg-accent); }
-.sg-observer .sg-live-label { margin-left: auto; color: var(--sg-accent); }
-.sg-tabs { flex: 0 0 auto; display: flex; gap: 2px; padding: 0 14px; border-bottom: 1px solid var(--sg-line); background: var(--sg-surface); }
-.sg-tab { background: transparent; border: 0; border-bottom: 2px solid transparent; padding: 10px 12px 9px; cursor: pointer; color: var(--sg-muted); font-size: 13px; }
-.sg-tab:hover { color: var(--sg-ink); }
-.sg-tab.sg-active { color: var(--sg-accent); border-bottom-color: var(--sg-accent); font-weight: 650; }
-.sg-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px 18px; }
-.sg-foot { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-top: 1px solid var(--sg-line); background: var(--sg-surface-2); font-size: 11px; color: var(--sg-muted); }
-.sg-foot .sg-last { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--sg-mono); font-size: 10px; }
-.sg-foot b { color: var(--sg-ink-2); font-weight: 600; }
-.sg-card { background: var(--sg-surface-2); border: 1px solid var(--sg-line); border-radius: var(--sg-radius); padding: 13px; margin-bottom: 12px; }
-.sg-card:last-child { margin-bottom: 0; }
-.sg-card-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
-.sg-card-head h3 { margin: 0; font-size: 13px; font-weight: 700; }
-.sg-card-sub { font: 10px/1.3 var(--sg-mono); color: var(--sg-muted); }
-.sg-head-gap { flex: 1; }
-.sg-field { margin-bottom: 11px; }
-.sg-field:last-child { margin-bottom: 0; }
-.sg-field label { display: block; font-size: 11px; color: var(--sg-muted); margin-bottom: 5px; }
-.sg-input, .sg-textarea, .sg-select {
-  width: 100%; background: var(--sg-surface); border: 1px solid var(--sg-line-strong);
-  border-radius: 5px; padding: 7px 9px; font: 13px/1.45 var(--sg-font); color: var(--sg-ink);
+
+.sg-icon-btn.sg-danger:hover {
+  background: var(--sg-danger-soft);
+  color: var(--sg-danger);
 }
-.sg-textarea { min-height: 68px; resize: vertical; }
-.sg-input::placeholder, .sg-textarea::placeholder { color: var(--sg-faint); }
-.sg-help { font-size: 11px; color: var(--sg-muted); margin-top: 4px; }
-.sg-btn { border-radius: var(--sg-radius); border: 1px solid var(--sg-line-strong); background: var(--sg-surface); padding: 7px 11px; font-size: 12px; cursor: pointer; color: var(--sg-ink-2); white-space: nowrap; }
-.sg-btn:hover { border-color: var(--sg-accent); color: var(--sg-accent); }
-.sg-btn-primary { background: var(--sg-accent); border-color: var(--sg-accent); color: var(--sg-on-accent); font-weight: 650; }
-.sg-btn-primary:hover { background: var(--sg-accent-hover); border-color: var(--sg-accent-hover); color: var(--sg-on-accent); }
-.sg-btn-danger { background: transparent; border-color: var(--sg-danger); color: var(--sg-danger); }
-.sg-btn-danger:hover { background: var(--sg-danger); color: #fff; }
-.sg-btn-sm { padding: 4px 8px; font-size: 11px; }
-.sg-btn:disabled { opacity: .45; cursor: not-allowed; }
-.sg-btn:disabled:hover { border-color: var(--sg-line-strong); color: var(--sg-ink-2); }
-.sg-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-.sg-grid2 { display: grid; grid-template-columns: minmax(210px,.92fr) minmax(250px,1.08fr); gap: 12px; align-items: start; }
-.sg-tree { display: grid; gap: 2px; }
-.sg-tree-row { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 5px 6px; border-radius: 5px; cursor: pointer; border: 1px solid transparent; }
-.sg-tree-row:hover { background: var(--sg-bg-soft); }
-.sg-tree-row.sg-selected { background: var(--sg-accent-soft); border-color: var(--sg-accent); }
-.sg-indent { flex: 0 0 auto; }
-.sg-twisty { width: 18px; height: 18px; flex: 0 0 auto; display: grid; place-items: center; background: transparent; border: 0; color: var(--sg-muted); cursor: pointer; font-size: 9px; padding: 0; }
-.sg-tree-name { flex: 1; min-width: 0; text-align: left; background: transparent; border: 0; padding: 2px 0; cursor: pointer; font-size: 12px; color: var(--sg-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sg-tree-row.sg-selected .sg-tree-name { font-weight: 700; color: var(--sg-accent); }
-.sg-tree-meta { font: 9px/1.3 var(--sg-mono); color: var(--sg-muted); flex: 0 0 auto; white-space: nowrap; }
-.sg-tree-actions { display: none; gap: 3px; flex: 0 0 auto; }
-.sg-tree-row:hover .sg-tree-actions, .sg-tree-row:focus-within .sg-tree-actions { display: flex; }
-.sg-empty { border: 1px dashed var(--sg-line-strong); border-radius: var(--sg-radius); padding: 14px; font-size: 12px; color: var(--sg-muted); text-align: center; }
-.sg-section-label { font: 10px/1.4 var(--sg-mono); letter-spacing: .08em; color: var(--sg-muted); margin: 13px 0 7px; text-transform: uppercase; }
-.sg-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.sg-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--sg-accent-soft); border: 1px solid var(--sg-accent); color: var(--sg-accent); border-radius: 999px; padding: 3px 8px; font: 11px/1.4 var(--sg-mono); }
-.sg-chip button { background: transparent; border: 0; color: var(--sg-accent); cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
-.sg-attach-row { display: flex; gap: 8px; }
-.sg-attach-row .sg-select { flex: 1; min-width: 0; }
-.sg-danger { border: 1px dashed var(--sg-danger); border-radius: var(--sg-radius); padding: 10px; margin-top: 14px; background: var(--sg-danger-soft); }
-.sg-danger p { margin: 0 0 8px; font-size: 11px; color: var(--sg-danger); }
-.sg-skill-list { display: grid; gap: 8px; }
-.sg-skill-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; border: 1px solid var(--sg-line); border-radius: var(--sg-radius); padding: 9px 10px; background: var(--sg-surface); }
-.sg-skill-main { min-width: 0; }
-.sg-skill-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.sg-skill-title strong { font: 12px/1.4 var(--sg-mono); }
-.sg-file-count { font: 9px/1.4 var(--sg-mono); color: var(--sg-muted); }
-.sg-skill-row p { margin: 3px 0 0; font-size: 11px; color: var(--sg-muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.sg-skill-paths { font: 9px/1.5 var(--sg-mono); color: var(--sg-faint); margin-top: 5px; }
-.sg-upload-report { border-left: 3px solid var(--sg-warning); background: var(--sg-warning-soft); border-radius: var(--sg-radius); padding: 10px 12px; font-size: 11px; margin-bottom: 12px; }
-.sg-upload-report.sg-ok { border-left-color: var(--sg-accent); background: var(--sg-accent-soft); }
-.sg-upload-report ul { margin: 6px 0 0; padding-left: 16px; }
-.sg-upload-report li { margin: 2px 0; color: var(--sg-ink-2); }
-.sg-upload-report li.sg-reason { color: var(--sg-danger); }
-.sg-stats-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
-.sg-chips { display: inline-flex; gap: 4px; background: var(--sg-bg-soft); border: 1px solid var(--sg-line); border-radius: var(--sg-radius); padding: 3px; }
-.sg-chips button { background: transparent; border: 0; border-radius: 4px; padding: 4px 9px; font-size: 11px; color: var(--sg-muted); cursor: pointer; }
-.sg-chips button.sg-active { background: var(--sg-surface-2); color: var(--sg-accent); font-weight: 700; }
-.sg-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
-.sg-timeline-card { grid-column: 1 / -1; }
-.sg-timeline { display: grid; gap: 7px; }
-.sg-timeline-item { display: grid; grid-template-columns: 64px 1fr; gap: 8px; border: 1px solid var(--sg-line); border-radius: var(--sg-radius); padding: 7px 9px; background: var(--sg-surface); font-size: 11px; }
-.sg-timeline-time { font: 10px/1.4 var(--sg-mono); color: var(--sg-muted); padding-top: 1px; }
-.sg-timeline-main { min-width: 0; }
-.sg-timeline-main strong { font: 11px/1.4 var(--sg-mono); }
-.sg-timeline-path { font: 9px/1.4 var(--sg-mono); color: var(--sg-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sg-source { display: inline-flex; font: 9px/1.4 var(--sg-mono); padding: 1px 6px; border-radius: 3px; margin-left: 7px; vertical-align: 1px; }
-.sg-source-gateway { background: var(--sg-accent-soft); color: var(--sg-accent); border: 1px solid var(--sg-accent); }
-.sg-source-agent { background: var(--sg-agent-soft); color: var(--sg-agent); border: 1px solid var(--sg-agent); }
-.sg-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-.sg-table th { text-align: left; font: 9px/1.4 var(--sg-mono); letter-spacing: .06em; color: var(--sg-muted); font-weight: 500; padding: 0 4px 7px; }
-.sg-table td { padding: 7px 4px; vertical-align: middle; border-top: 1px solid var(--sg-line); }
-.sg-table td:last-child { text-align: right; }
-.sg-stat-name { font: 11px/1.4 var(--sg-mono); font-weight: 650; }
-.sg-stat-num { font: 11px/1.4 var(--sg-mono); color: var(--sg-ink-2); }
-.sg-stat-share { font: 10px/1.4 var(--sg-mono); color: var(--sg-muted); }
-.sg-bar { height: 3px; background: var(--sg-accent); border-radius: 2px; margin-top: 3px; max-width: 120px; }
-.sg-table-scroll { overflow: auto; }
-.sg-note { font-size: 10px; color: var(--sg-muted); margin-top: 8px; }
-.sg-result-empty { border: 1px dashed var(--sg-line-strong); border-radius: var(--sg-radius); padding: 18px; text-align: center; color: var(--sg-muted); font-size: 12px; }
-.sg-path-pill { font: 11px/1.4 var(--sg-mono); background: var(--sg-accent-soft); color: var(--sg-accent); border: 1px solid var(--sg-accent); padding: 3px 7px; border-radius: 4px; }
-.sg-match-note { font-size: 11px; color: var(--sg-muted); }
-.sg-skill-result-list { display: grid; gap: 8px; }
-.sg-skill-result { display: flex; align-items: center; gap: 10px; border: 1px solid var(--sg-line); border-radius: var(--sg-radius); padding: 9px 10px; background: var(--sg-surface); }
-.sg-skill-result .sg-skill-main { flex: 1; min-width: 0; }
-.sg-skill-result strong { font: 12px/1.4 var(--sg-mono); }
-.sg-skill-result p { margin: 3px 0 0; font-size: 11px; color: var(--sg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sg-json { background: #101815; color: #D7E2DC; border-radius: var(--sg-radius); padding: 11px; font: 10.5px/1.55 var(--sg-mono); overflow: auto; max-height: 260px; margin: 10px 0 0; white-space: pre; }
-.sg-raw summary { font-size: 11px; color: var(--sg-muted); cursor: pointer; margin-top: 10px; }
-.sg-file-list { display: grid; gap: 5px; margin-top: 9px; }
-.sg-file-row { display: flex; gap: 8px; align-items: baseline; font: 11px/1.4 var(--sg-mono); border: 1px solid var(--sg-line); border-radius: 4px; padding: 5px 8px; background: var(--sg-surface); }
-.sg-file-row span:first-child { color: var(--sg-accent); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sg-file-row span:last-child { margin-left: auto; color: var(--sg-muted); font-size: 10px; }
-.sg-preview { margin-top: 8px; background: var(--sg-surface); border: 1px solid var(--sg-line); border-radius: 4px; padding: 8px; font: 11px/1.5 var(--sg-mono); color: var(--sg-muted); white-space: pre-wrap; max-height: 140px; overflow: auto; }
-.sg-error { border: 1px solid var(--sg-danger); background: var(--sg-danger-soft); color: var(--sg-danger); border-radius: var(--sg-radius); padding: 10px 12px; font-size: 12px; }
-@media (prefers-reduced-motion: reduce) {
-  .sg-panel { animation: none; }
-  .sg-switch .sg-track, .sg-switch .sg-knob, .sg-gate i { transition: none; }
+
+.sg-panel-tabs {
+  padding: 12px 16px 8px;
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--sg-line-soft);
+  flex: 0 0 auto;
 }
+
+.sg-panel-tabs .sg-segmented {
+  width: 100%;
+}
+
+.sg-panel-tabs .sg-segmented button {
+  flex: 1;
+  justify-content: center;
+}
+
+.sg-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  background: var(--sg-bg-secondary);
+  padding: 16px;
+}
+
+/* ------------------------------------------------------------------------ */
+/* 通用组件                                                                  */
+/* ------------------------------------------------------------------------ */
+
+.sg-btn {
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: var(--sg-r-md);
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  white-space: nowrap;
+}
+
+.sg-btn-primary {
+  background: var(--sg-primary-gradient);
+  color: #fff;
+  box-shadow: var(--sg-shadow-normal);
+}
+
+.sg-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+  box-shadow: var(--sg-shadow-float);
+}
+
+.sg-btn-secondary {
+  background: var(--sg-primary-soft);
+  color: var(--sg-primary);
+}
+
+.sg-btn-secondary:hover:not(:disabled) {
+  background: var(--sg-primary-soft-hover);
+}
+
+.sg-btn-ghost {
+  background: var(--sg-bg);
+  color: var(--sg-ink-1);
+  box-shadow: var(--sg-shadow-normal);
+  border: 1px solid var(--sg-line-soft);
+}
+
+.sg-btn-ghost:hover:not(:disabled) {
+  background: var(--sg-bg-secondary);
+}
+
+.sg-btn-danger-soft {
+  background: var(--sg-danger-soft);
+  color: var(--sg-danger);
+}
+
+.sg-btn-danger-soft:hover:not(:disabled) {
+  filter: brightness(0.97);
+}
+
+.sg-btn-sm {
+  height: 30px;
+  padding: 6px 12px;
+  border-radius: var(--sg-r-sm);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.sg-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sg-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--sg-bg);
+  border: 1px solid var(--sg-line);
+  border-radius: var(--sg-r-full);
+}
+
+.sg-segmented button {
+  border: 0;
+  background: transparent;
+  color: var(--sg-ink-2);
+  border-radius: var(--sg-r-full);
+  height: 28px;
+  padding: 0 12px;
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.sg-segmented button:hover:not(.sg-is-active) {
+  color: var(--sg-ink-1);
+}
+
+.sg-segmented button.sg-is-active {
+  background: var(--sg-primary-soft);
+  color: var(--sg-primary);
+  font-weight: 500;
+}
+
+.sg-segmented.sg-sm button {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.sg-card {
+  background: var(--sg-bg);
+  border: 1px solid var(--sg-line-soft);
+  border-radius: var(--sg-r-md);
+  box-shadow: var(--sg-shadow-normal);
+  padding: 16px;
+  transition: box-shadow 0.2s ease;
+}
+
+.sg-card:hover {
+  box-shadow: var(--sg-shadow-float);
+}
+
+.sg-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.sg-section-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--sg-ink-1);
+}
+
+.sg-section-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sg-ink-3);
+}
+
+.sg-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.sg-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Badge */
+.sg-badge {
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border-radius: var(--sg-r-full);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.sg-badge.sg-primary { background: var(--sg-primary-soft); color: var(--sg-primary); }
+.sg-badge.sg-success { background: var(--sg-success-soft); color: var(--sg-success); }
+.sg-badge.sg-warning { background: var(--sg-warning-soft); color: var(--sg-warning); }
+.sg-badge.sg-danger  { background: var(--sg-danger-soft);  color: var(--sg-danger); }
+.sg-badge.sg-neutral { background: var(--sg-bg-hover); color: var(--sg-ink-2); }
+
+.sg-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.sg-dot.sg-success { background: var(--sg-success); }
+.sg-dot.sg-danger  { background: var(--sg-danger); }
+.sg-dot.sg-warning { background: var(--sg-warning); }
+.sg-dot.sg-neutral { background: var(--sg-ink-4); }
+
+/* Switch 开关 */
+.sg-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.sg-switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sg-switch-track {
+  width: 36px;
+  height: 20px;
+  border-radius: var(--sg-r-full);
+  background: var(--sg-ink-4);
+  position: relative;
+  transition: background 0.2s ease;
+}
+
+.sg-switch-track::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  transition: transform 0.2s ease;
+}
+
+.sg-switch input:checked + .sg-switch-track {
+  background: var(--sg-primary);
+}
+
+.sg-switch input:checked + .sg-switch-track::after {
+  transform: translateX(16px);
+}
+
+.sg-switch-label {
+  font-size: 12px;
+  color: var(--sg-ink-2);
+}
+
+/* Search */
+.sg-search {
+  position: relative;
+}
+
+.sg-search svg {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--sg-ink-3);
+  pointer-events: none;
+}
+
+.sg-search input {
+  width: 100%;
+  height: 42px;
+  border: 1px solid var(--sg-line);
+  border-radius: var(--sg-r-lg);
+  background: var(--sg-bg);
+  padding: 12px 16px 12px 40px;
+  font-size: 14px;
+  color: var(--sg-ink-1);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.sg-search input::placeholder {
+  color: var(--sg-ink-4);
+}
+
+.sg-search input:focus {
+  outline: none;
+  border-color: var(--sg-primary);
+  box-shadow: var(--sg-shadow-focus);
+}
+
+/* Empty state：图标 → 标题 → 描述 → 操作按钮 */
+.sg-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 28px 16px;
+}
+
+.sg-empty-icon {
+  width: 96px;
+  height: 96px;
+  border-radius: var(--sg-r-full);
+  background: var(--sg-primary-soft);
+  color: var(--sg-primary);
+  display: grid;
+  place-items: center;
+  margin-bottom: 16px;
+}
+
+.sg-empty-icon svg {
+  width: 40px;
+  height: 40px;
+}
+
+.sg-empty-title {
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--sg-ink-1);
+  margin: 0;
+}
+
+.sg-empty-desc {
+  margin: 4px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--sg-ink-3);
+  max-width: 280px;
+}
+
+.sg-empty-actions {
+  margin-top: 24px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Progress */
+.sg-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sg-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--sg-r-full);
+  background: var(--sg-bg-hover);
+  overflow: hidden;
+}
+
+.sg-progress-fill {
+  height: 100%;
+  border-radius: var(--sg-r-full);
+  background: var(--sg-primary);
+  min-width: 2px;
+}
+
+.sg-progress-text {
+  font-size: 12px;
+  color: var(--sg-ink-3);
+  min-width: 44px;
+  text-align: right;
+}
+
+/* Notice / callout */
+.sg-notice {
+  display: flex;
+  gap: 8px;
+  border-radius: var(--sg-r-sm);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sg-notice.sg-info {
+  background: var(--sg-primary-soft);
+  color: var(--sg-ink-2);
+}
+
+.sg-notice.sg-success {
+  background: var(--sg-success-soft);
+  color: var(--sg-ink-2);
+}
+
+.sg-notice.sg-warning {
+  background: var(--sg-warning-soft);
+  color: var(--sg-ink-2);
+}
+
+.sg-notice.sg-danger {
+  background: var(--sg-danger-soft);
+  color: var(--sg-ink-2);
+}
+
+.sg-notice svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.sg-notice .sg-prompt-pre {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 0 0 8px;
+}
+
+/* ------------------------------------------------------------------------ */
+/* 场景树管理                                                                */
+/* ------------------------------------------------------------------------ */
+
+.sg-view-switch {
+  margin-top: 12px;
+}
+
+.sg-tree-card {
+  padding: 8px;
+}
+
+.sg-tree-node {
+  min-width: 0;
+}
+
+.sg-tree-row,
+.sg-skill-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  border-radius: var(--sg-r-sm);
+  padding: 8px;
+  position: relative;
+  cursor: default;
+}
+
+.sg-tree-row:hover,
+.sg-skill-row:hover {
+  background: var(--sg-bg-secondary);
+}
+
+.sg-tree-row.sg-is-selected {
+  background: var(--sg-primary-soft);
+}
+
+.sg-tree-caret {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--sg-ink-3);
+  cursor: pointer;
+  padding: 0;
+  flex: 0 0 auto;
+}
+
+.sg-tree-caret svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.2s ease;
+}
+
+.sg-tree-caret.sg-is-expanded svg {
+  transform: rotate(90deg);
+}
+
+.sg-tree-spacer {
+  width: 20px;
+  flex: 0 0 auto;
+}
+
+.sg-tree-icon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--sg-primary);
+  background: var(--sg-primary-soft);
+  flex: 0 0 auto;
+}
+
+.sg-skill-row .sg-tree-icon {
+  color: var(--sg-ink-2);
+  background: var(--sg-bg-hover);
+}
+
+.sg-tree-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.sg-tree-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.sg-tree-title-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sg-tree-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sg-ink-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sg-tree-row.sg-is-selected .sg-tree-title {
+  color: var(--sg-primary);
+}
+
+.sg-tree-desc {
+  font-size: 12px;
+  color: var(--sg-ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sg-tree-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.sg-tag {
+  font-size: 11px;
+  color: var(--sg-ink-3);
+  background: var(--sg-bg-hover);
+  border-radius: var(--sg-r-full);
+  padding: 1px 6px;
+}
+
+.sg-tree-actions {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.sg-tree-row:hover .sg-tree-actions,
+.sg-tree-row:focus-within .sg-tree-actions,
+.sg-skill-row:hover .sg-tree-actions,
+.sg-skill-row:focus-within .sg-tree-actions {
+  opacity: 1;
+}
+
+.sg-tree-actions .sg-icon-btn {
+  width: 26px;
+  height: 26px;
+}
+
+.sg-tree-actions .sg-icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.sg-skill-scenes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.sg-path-chip {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--sg-ink-3);
+  background: var(--sg-bg-hover);
+  border-radius: var(--sg-r-full);
+  padding: 1px 6px;
+}
+
+/* 全部技能列表 */
+.sg-skill-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.sg-skill-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--sg-r-sm);
+}
+
+.sg-skill-list-item:hover {
+  background: var(--sg-bg-secondary);
+}
+
+.sg-skill-list-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.sg-skill-name-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sg-skill-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sg-ink-1);
+}
+
+.sg-skill-desc {
+  font-size: 12px;
+  color: var(--sg-ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sg-skill-list-actions {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.sg-skill-list-item:hover .sg-skill-list-actions,
+.sg-skill-list-item:focus-within .sg-skill-list-actions {
+  opacity: 1;
+}
+
+/* 数据落点卡 */
+.sg-location-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sg-location-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--sg-r-sm);
+  background: var(--sg-primary-soft);
+  color: var(--sg-primary);
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.sg-location-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.sg-location-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sg-ink-1);
+}
+
+.sg-location-path {
+  font-family: var(--sg-font-mono);
+  font-size: 12px;
+  color: var(--sg-ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sg-location-sub {
+  font-size: 11px;
+  color: var(--sg-ink-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------------ */
+/* 统计 tab                                                                  */
+/* ------------------------------------------------------------------------ */
+
+.sg-stat-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.sg-stat-card {
+  padding: 12px 16px;
+}
+
+.sg-stat-label {
+  font-size: 12px;
+  color: var(--sg-ink-3);
+}
+
+.sg-stat-value {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--sg-ink-1);
+}
+
+.sg-stat-foot {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--sg-ink-4);
+}
+
+.sg-table-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.sg-table-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--sg-line-soft);
+}
+
+.sg-table-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--sg-ink-1);
+}
+
+.sg-table-count {
+  font-size: 12px;
+  color: var(--sg-ink-3);
+}
+
+.sg-table-wrap {
+  overflow-x: auto;
+}
+
+table.sg-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 360px;
+}
+
+.sg-data-table th {
+  height: 40px;
+  padding: 0 12px;
+  background: var(--sg-bg-secondary);
+  color: var(--sg-ink-1);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sg-data-table td {
+  height: 48px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--sg-line-soft);
+  color: var(--sg-ink-2);
+  font-size: 14px;
+  vertical-align: middle;
+}
+
+.sg-data-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.sg-data-table tbody tr:hover td {
+  background: var(--sg-bg-secondary);
+}
+
+.sg-data-table .sg-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sg-data-table .sg-primary-cell {
+  color: var(--sg-ink-1);
+  font-weight: 500;
+}
+
+.sg-data-table .sg-sub-cell {
+  display: block;
+  font-size: 11px;
+  color: var(--sg-ink-4);
+  font-weight: 400;
+}
+
+.sg-cell-progress {
+  min-width: 96px;
+}
+
+.sg-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 8px 16px;
+}
+
+.sg-timeline-item {
+  position: relative;
+  padding: 10px 0 10px 20px;
+  border-bottom: 1px solid var(--sg-line-soft);
+}
+
+.sg-timeline-item:last-child {
+  border-bottom: 0;
+}
+
+.sg-timeline-item::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 18px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sg-primary);
+}
+
+.sg-timeline-item.sg-agent::before {
+  background: var(--sg-ink-4);
+}
+
+.sg-timeline-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sg-timeline-time {
+  font-family: var(--sg-font-mono);
+  font-size: 11px;
+  color: var(--sg-ink-3);
+}
+
+.sg-timeline-skill {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sg-ink-1);
+}
+
+.sg-timeline-path {
+  width: 100%;
+  font-size: 12px;
+  color: var(--sg-ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------------ */
+/* 网关取用 tab                                                              */
+/* ------------------------------------------------------------------------ */
+
+.sg-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.sg-breadcrumb span {
+  color: var(--sg-ink-3);
+  font-size: 12px;
+}
+
+.sg-breadcrumb .sg-current {
+  color: var(--sg-ink-1);
+  font-weight: 500;
+}
+
+.sg-breadcrumb svg {
+  width: 12px;
+  height: 12px;
+  color: var(--sg-ink-4);
+}
+
+.sg-gateway-scene-desc {
+  font-size: 14px;
+  color: var(--sg-ink-2);
+  line-height: 1.5;
+}
+
+.sg-gateway-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sg-gateway-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--sg-line-soft);
+  border-radius: var(--sg-r-sm);
+  padding: 10px 12px;
+  background: var(--sg-bg-secondary);
+}
+
+.sg-gateway-item-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.sg-gateway-item-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sg-ink-1);
+}
+
+.sg-gateway-item-desc {
+  font-size: 12px;
+  color: var(--sg-ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sg-gateway-item-meta {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.sg-prompt-pre {
+  margin: 0;
+  background: var(--sg-bg-secondary);
+  border-radius: var(--sg-r-sm);
+  padding: 12px;
+  font-family: var(--sg-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--sg-ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+}
+
+details.sg-card > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sg-ink-1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+details.sg-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.sg-card > summary svg {
+  color: var(--sg-ink-3);
+  transition: transform 0.2s ease;
+}
+
+details.sg-card[open] > summary svg {
+  transform: rotate(90deg);
+}
+
+details.sg-card[open] > summary {
+  margin-bottom: 12px;
+}
+
+/* ------------------------------------------------------------------------ */
+/* 表单与校验                                                                */
+/* ------------------------------------------------------------------------ */
+
+.sg-field {
+  margin-bottom: 16px;
+}
+
+.sg-field:last-child {
+  margin-bottom: 0;
+}
+
+.sg-field-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sg-ink-2);
+  margin-bottom: 8px;
+}
+
+.sg-required {
+  color: var(--sg-danger);
+  margin-right: 4px;
+}
+
+.sg-field input[type="text"],
+.sg-field input[type="search"],
+.sg-field input[type="password"],
+.sg-field textarea,
+.sg-field select {
+  width: 100%;
+  border: 1px solid var(--sg-line);
+  border-radius: var(--sg-r-lg);
+  background: var(--sg-bg);
+  padding: 12px 16px;
+  font-size: 14px;
+  color: var(--sg-ink-1);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.sg-field textarea {
+  resize: vertical;
+  min-height: 76px;
+  line-height: 1.5;
+}
+
+.sg-field input:focus,
+.sg-field textarea:focus,
+.sg-field select:focus {
+  outline: none;
+  border-color: var(--sg-primary);
+  box-shadow: var(--sg-shadow-focus);
+}
+
+.sg-field input:disabled,
+.sg-field textarea:disabled,
+.sg-field select:disabled {
+  background: var(--sg-bg-secondary);
+  border-color: var(--sg-line-soft);
+  color: var(--sg-ink-3);
+  cursor: not-allowed;
+}
+
+.sg-field input.sg-is-invalid,
+.sg-field textarea.sg-is-invalid {
+  border-color: var(--sg-danger);
+}
+
+.sg-field-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sg-ink-3);
+}
+
+.sg-field-error {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sg-danger);
+}
+
+.sg-form-error {
+  margin-top: 8px;
+  border-radius: var(--sg-r-sm);
+  background: var(--sg-danger-soft);
+  color: var(--sg-danger);
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
+.sg-radio-list,
+.sg-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.sg-check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--sg-line);
+  border-radius: var(--sg-r-sm);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.sg-check-row:hover {
+  background: var(--sg-bg-secondary);
+}
+
+.sg-check-row input {
+  accent-color: var(--sg-primary);
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.sg-check-row-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.sg-check-row-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sg-ink-1);
+}
+
+.sg-check-row-desc {
+  font-size: 12px;
+  color: var(--sg-ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------------ */
+/* 上传场景树                                                                */
+/* ------------------------------------------------------------------------ */
+
+.sg-dropzone {
+  border: 1px dashed var(--sg-line);
+  border-radius: var(--sg-r-md);
+  background: var(--sg-bg-secondary);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.sg-dropzone:hover {
+  border-color: var(--sg-primary);
+  background: var(--sg-primary-soft);
+}
+
+.sg-dropzone-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--sg-r-full);
+  background: var(--sg-primary-soft);
+  color: var(--sg-primary);
+  display: grid;
+  place-items: center;
+  margin-bottom: 12px;
+}
+
+.sg-dropzone-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.sg-dropzone-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--sg-ink-1);
+}
+
+.sg-dropzone-desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sg-ink-3);
+  max-width: 420px;
+}
+
+.sg-dropzone-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.sg-upload-preview {
+  margin-top: 16px;
+}
+
+.sg-upload-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sg-upload-summary-item {
+  background: var(--sg-bg-secondary);
+  border-radius: var(--sg-r-sm);
+  padding: 10px 12px;
+}
+
+.sg-upload-summary-label {
+  font-size: 11px;
+  color: var(--sg-ink-3);
+}
+
+.sg-upload-summary-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--sg-ink-1);
+}
+
+.sg-upload-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sg-upload-skill-row {
+  border: 1px solid var(--sg-line-soft);
+  border-radius: var(--sg-r-sm);
+  padding: 10px 12px;
+}
+
+.sg-upload-skill-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sg-upload-skill-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sg-ink-1);
+}
+
+.sg-upload-skill-desc {
+  font-size: 12px;
+  color: var(--sg-ink-3);
+  margin-top: 2px;
+}
+
+.sg-reason-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--sg-danger);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ------------------------------------------------------------------------ */
+/* 弹窗 Modal                                                                */
+/* ------------------------------------------------------------------------ */
+
+.sg-modal-root:empty {
+  display: none;
+}
+
+.sg-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: fade-in 0.16s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.sg-modal {
+  width: 520px;
+  max-width: 100%;
+  max-height: calc(100dvh - 48px);
+  display: flex;
+  flex-direction: column;
+  background: var(--sg-bg);
+  border-radius: var(--sg-r-md);
+  box-shadow: var(--sg-shadow-float);
+  animation: modal-in 0.18s ease;
+}
+
+.sg-modal.sg-large {
+  width: 720px;
+}
+
+.sg-modal.sg-confirm {
+  width: 400px;
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.sg-modal-header {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--sg-line-soft);
+  flex: 0 0 auto;
+}
+
+.sg-modal-title {
+  flex: 1;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--sg-ink-1);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sg-modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.sg-modal-footer {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 0 24px;
+  border-top: 1px solid var(--sg-line-soft);
+  flex: 0 0 auto;
+}
+
+.sg-modal-footer .sg-btn {
+  min-width: 72px;
+}
+
+/* 文件预览弹窗 */
+.sg-file-preview {
+  display: flex;
+  gap: 16px;
+  min-height: 320px;
+}
+
+.sg-file-tree {
+  width: 200px;
+  flex: 0 0 auto;
+  border: 1px solid var(--sg-line-soft);
+  border-radius: var(--sg-r-sm);
+  background: var(--sg-bg-secondary);
+  padding: 8px;
+  overflow-y: auto;
+  max-height: 380px;
+}
+
+.sg-file-tree button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--sg-ink-2);
+  font-size: 12px;
+  padding: 7px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sg-file-tree button:hover {
+  background: var(--sg-bg-hover);
+  color: var(--sg-ink-1);
+}
+
+.sg-file-tree button.sg-is-active {
+  background: var(--sg-primary-soft);
+  color: var(--sg-primary);
+  font-weight: 500;
+}
+
+.sg-file-tree button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.sg-file-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--sg-line-soft);
+  border-radius: var(--sg-r-sm);
+  overflow: hidden;
+}
+
+.sg-file-content-head {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: var(--sg-bg-secondary);
+  border-bottom: 1px solid var(--sg-line-soft);
+  font-family: var(--sg-font-mono);
+  font-size: 12px;
+  color: var(--sg-ink-2);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sg-file-content pre {
+  flex: 1;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  font-family: var(--sg-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--sg-ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Toast                                                                     */
+/* ------------------------------------------------------------------------ */
+
+.sg-toast-root {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  pointer-events: none;
+}
+
+.sg-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+  max-width: 440px;
+  padding: 12px 20px;
+  border-radius: var(--sg-r-sm);
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--sg-line-soft);
+  box-shadow: var(--sg-shadow-float);
+  color: var(--sg-ink-1);
+  font-size: 14px;
+  animation: toast-in 0.2s ease;
+}
+
+.sg-toast.sg-success svg { color: var(--sg-success); }
+.sg-toast.sg-danger svg  { color: var(--sg-danger); }
+.sg-toast.sg-warning svg { color: var(--sg-warning); }
+.sg-toast.sg-info svg    { color: var(--sg-primary); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Skill Gateway 覆盖：弹窗与 Toast 必须浮在侧边栏之上 */
+.sg-modal-backdrop { z-index: 1400; }
+.sg-toast-root { z-index: 1500; }
 `;
 
     if (typeof document !== 'undefined') {
@@ -280,9 +1755,13 @@ window.__ModuleLoader__.load({
       document.head.appendChild(style);
     }
 
+    /* ------------------------------------------------------------------ */
+    /* 基础工具                                                            */
+    /* ------------------------------------------------------------------ */
+
     async function api(method, pathname, body) {
       const opts = { method, headers: {} };
-      if (body) {
+      if (body !== undefined) {
         opts.headers['Content-Type'] = 'application/json';
         opts.body = JSON.stringify(body);
       }
@@ -292,19 +1771,73 @@ window.__ModuleLoader__.load({
       return data;
     }
 
-    const withCwd = (pathname, cwd) => {
+    function withCwd(pathname, cwd) {
+      if (!cwd) return pathname;
       const sep = pathname.includes('?') ? '&' : '?';
-      return cwd ? `${pathname}${sep}cwd=${encodeURIComponent(cwd)}` : pathname;
-    };
+      return `${pathname}${sep}cwd=${encodeURIComponent(cwd)}`;
+    }
 
-    function fmtTime(timestamp) {
+    function withParams(pathname, params) {
+      const search = new URLSearchParams();
+      Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') search.set(key, value);
+      });
+      const text = search.toString();
+      const sep = pathname.includes('?') ? '&' : '?';
+      return text ? `${pathname}${sep}${text}` : pathname;
+    }
+
+    function cx(...parts) {
+      return parts.filter(Boolean).join(' ');
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function pad(value) {
+      return String(value).padStart(2, '0');
+    }
+
+    function fmtClock(timestamp) {
+      const date = new Date(Number(timestamp));
+      if (Number.isNaN(date.getTime())) return '—';
+      return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    }
+
+    function fmtDateTime(timestamp) {
       if (!timestamp) return '—';
       const date = new Date(Number(timestamp));
-      return Number.isNaN(date.getTime()) ? String(timestamp) : date.toLocaleString();
+      if (Number.isNaN(date.getTime())) return String(timestamp);
+      return `${date.getMonth() + 1}/${date.getDate()} ${fmtClock(timestamp)}`;
+    }
+
+    function fmtRelative(timestamp) {
+      if (!timestamp) return '—';
+      const diff = Date.now() - Number(timestamp || 0);
+      const MINUTE = 60 * 1000;
+      const HOUR = 60 * MINUTE;
+      const DAY = 24 * HOUR;
+      if (diff < MINUTE) return '刚刚';
+      if (diff < HOUR) return `${Math.floor(diff / MINUTE)} 分钟前`;
+      if (diff < DAY) return `${Math.floor(diff / HOUR)} 小时前`;
+      if (diff < 30 * DAY) return `${Math.floor(diff / DAY)} 天前`;
+      return fmtDateTime(timestamp);
     }
 
     function fmtShare(share) {
-      return `${Math.round((Number(share) || 0) * 1000) / 10}%`;
+      const value = Number(share) || 0;
+      return `${Math.round(value * 1000) / 10}%`;
+    }
+
+    function normalizeTags(tags) {
+      if (Array.isArray(tags)) {
+        return [...new Set(tags.map((tag) => String(tag == null ? '' : tag).trim()).filter(Boolean))];
+      }
+      if (typeof tags === 'string') {
+        return [...new Set(tags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean))];
+      }
+      return [];
     }
 
     function scenePathOf(catalog, sceneId) {
@@ -327,427 +1860,1678 @@ window.__ModuleLoader__.load({
         .sort();
     }
 
-    function SceneTree({ catalog, selectedId, onSelect, onAddChild, onDeleteScene }) {
-      const [collapsed, setCollapsed] = useState(() => new Set());
-      const renderScene = (scene, depth) => {
-        const hasChildren = (scene.children || []).length > 0;
-        const isCollapsed = collapsed.has(scene.id);
-        return h('div', { key: scene.id },
-          h('div', {
-            className: 'sg-tree-row' + (scene.id === selectedId ? ' sg-selected' : ''),
-            onClick: () => onSelect(scene.id),
+    function collectDescendants(catalog, sceneId) {
+      const ids = [];
+      const queue = [sceneId];
+      const seen = new Set();
+      while (queue.length) {
+        const id = queue.shift();
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const scene = catalog.scenes && catalog.scenes[id];
+        if (!scene) continue;
+        ids.push(id);
+        queue.push(...(scene.children || []));
+      }
+      return ids;
+    }
+
+    function flattenSceneOptions(catalog) {
+      const options = [];
+      const walk = (sceneId, depth) => {
+        const scene = catalog.scenes[sceneId];
+        if (!scene) return;
+        options.push({ id: scene.id, name: scene.name, depth });
+        (scene.children || []).forEach((childId) => walk(childId, depth + 1));
+      };
+      if (catalog.scenes[catalog.rootSceneId]) walk(catalog.rootSceneId, 0);
+      return options;
+    }
+
+    function containsText(value, query) {
+      return String(value || '').toLowerCase().includes(String(query || '').toLowerCase());
+    }
+
+    function sceneSelfMatches(scene, query) {
+      return containsText(scene.name, query) ||
+        containsText(scene.description, query) ||
+        (scene.tags || []).some((tag) => containsText(tag, query));
+    }
+
+    function skillMetaMatches(skill, query) {
+      return Boolean(skill) && (containsText(skill.name, query) || containsText(skill.description, query));
+    }
+
+    function sceneTreeMatches(catalog, sceneId, query) {
+      const scene = catalog.scenes[sceneId];
+      if (!scene) return false;
+      if (!query) return true;
+      if (sceneSelfMatches(scene, query)) return true;
+      if ((scene.children || []).some((childId) => sceneTreeMatches(catalog, childId, query))) return true;
+      return (scene.skills || []).some((skillName) => skillMetaMatches(catalog.skills[skillName], query));
+    }
+
+    function browseFromCatalog(catalog, sceneId) {
+      const rootId = catalog.rootSceneId;
+      const requestedId = sceneId === undefined || sceneId === null || String(sceneId).trim() === ''
+        ? rootId
+        : String(sceneId).trim();
+      const scene = catalog.scenes[requestedId];
+      if (!scene) return { ok: false, error: '场景不存在。' };
+      const children = (scene.children || [])
+        .map((childId) => {
+          const child = catalog.scenes[childId];
+          if (!child) return null;
+          return {
+            id: child.id,
+            name: child.name,
+            description: child.description,
+            tags: child.tags || [],
+            childCount: (child.children || []).length,
+            skillCount: (child.skills || []).length,
+          };
+        })
+        .filter(Boolean);
+      const skills = (scene.skills || [])
+        .map((skillName) => {
+          const skill = catalog.skills[skillName];
+          return skill ? { name: skill.name, description: skill.description } : null;
+        })
+        .filter(Boolean);
+      return {
+        ok: true,
+        sceneId: scene.id,
+        parentId: scene.parentId || null,
+        path: scenePathOf(catalog, scene.id),
+        name: scene.name,
+        description: scene.description,
+        tags: scene.tags || [],
+        children,
+        skills,
+      };
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* 图标与 Logo                                                         */
+    /* ------------------------------------------------------------------ */
+
+    const ICON_PATHS = {
+      'chevron-right': [['path', { d: 'm6 3 5 5-5 5' }]],
+      'chevron-down': [['path', { d: 'm3 6 5 5 5-5' }]],
+      plus: [['path', { d: 'M8 3v10M3 8h10' }]],
+      edit: [['path', { d: 'M10.8 2.8 13.2 5.2 5.5 13H3v-2.5L10.8 2.8ZM9.4 4.2l2.4 2.4' }]],
+      trash: [['path', { d: 'M2.5 4h11M5.5 4V2.5h5V4M3.5 4l.8 10h7.4l.8-10M6.5 7v4M9.5 7v4' }]],
+      folder: [['path', { d: 'M2 3.5h4.5l1.5 1.5H14v8H2v-9.5Z' }]],
+      file: [['path', { d: 'M4 2h5l3 3v9H4V2Z' }], ['path', { d: 'M9 2v3h3M6 8h4M6 11h4' }]],
+      skill: [['path', { d: 'M8 2.5c.7 2.6 1.4 3.3 4 4-2.6.7-3.3 1.4-4 4-.7-2.6-1.4-3.3-4-4 2.6-.7 3.3-1.4 4-4Z' }]],
+      close: [['path', { d: 'm3.5 3.5 9 9M12.5 3.5l-9 9' }]],
+      check: [['path', { d: 'm3 8.5 3.2 3L13 4.5' }]],
+      info: [['circle', { cx: 8, cy: 8, r: 6 }], ['path', { d: 'M8 7v4M8 4.8v.4' }]],
+      warning: [['path', { d: 'M8 2.5 14.5 14h-13L8 2.5Z' }], ['path', { d: 'M8 7v3M8 11.4v.4' }]],
+      error: [['circle', { cx: 8, cy: 8, r: 6 }], ['path', { d: 'M5.5 5.5l5 5M10.5 5.5l-5 5' }]],
+      upload: [['path', { d: 'M8 11V3M4.5 5.5 8 2l3.5 3.5M2.5 11.5V14h11v-2.5' }]],
+      search: [['circle', { cx: 7, cy: 7, r: 4.5 }], ['path', { d: 'm10.5 10.5 3 3' }]],
+      stats: [['path', { d: 'M2.5 13.5h11M4 10V6.5M8 10V3.5M12 10V5' }]],
+      gateway: [['circle', { cx: 4, cy: 8, r: 2.2 }], ['circle', { cx: 12, cy: 8, r: 2.2 }], ['path', { d: 'M6.2 8h3.6' }]],
+      database: [['ellipse', { cx: 8, cy: 3.5, rx: 5, ry: 2 }], ['path', { d: 'M3 3.5v9c0 1.1 2.2 2 5 2s5-.9 5-2v-9' }], ['path', { d: 'M3 8c0 1.1 2.2 2 5 2s5-.9 5-2' }]],
+      link: [['path', { d: 'm6.5 9.5 3-3M5 7.5 3.5 9a3.5 3.5 0 0 0 5 5l1.5-1.5M11 8.5l1.5-1.5a3.5 3.5 0 0 0-5-5L6 3.5' }]],
+      layers: [['path', { d: 'm8 2.5 6 3.5-6 3.5-6-3.5 6-3.5Z' }], ['path', { d: 'm2.5 9.5 5.5 3 5.5-3' }]],
+      'arrow-left': [['path', { d: 'M13 8H3M6.5 4.5 3 8l3.5 3.5' }]],
+      'arrow-up': [['path', { d: 'M8 13V3M4.5 6.5 8 3l3.5 3.5' }]],
+      eye: [['path', { d: 'M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4Z' }], ['circle', { cx: 8, cy: 8, r: 1.8 }]],
+      refresh: [['path', { d: 'M13.5 5V1.5M13.5 5H10M12.8 9.5A5 5 0 1 1 11 4.6' }]],
+      panel: [['path', { d: 'M10.5 2H14v12h-3.5V2ZM2 2h6v12H2V2Z' }]],
+      clock: [['circle', { cx: 8, cy: 8, r: 6 }], ['path', { d: 'M8 5v3.5l2.5 1.5' }]],
+    };
+
+    function Icon(props) {
+      const { name: iconName, className } = props;
+      const shapes = ICON_PATHS[iconName] || ICON_PATHS.info;
+      return h(
+        'svg',
+        { className: cx('sg-icon', className), viewBox: '0 0 16 16', 'aria-hidden': true },
+        shapes.map(([tag, attrs], index) => h(tag, Object.assign({ key: index }, attrs))),
+      );
+    }
+
+    /**
+     * Skill Gateway 产品 Logo：
+     * 左侧三个节点组成“场景树”，中部双柱 + 开启斜线构成“网关”，
+     * 右侧四角星代表“skill”。整体落在主色渐变圆角方块中。
+     */
+    function GatewayLogo(props = {}) {
+      const size = props.size || 32;
+      return h(
+        'svg',
+        {
+          className: 'sg-logo',
+          viewBox: '0 0 32 32',
+          width: size,
+          height: size,
+          role: 'img',
+          'aria-label': 'Skill Gateway logo：场景树、网关与 skill',
+        },
+        h('defs', null,
+          h('linearGradient', { id: 'sg-logo-gradient', x1: '4', y1: '2', x2: '28', y2: '30', gradientUnits: 'userSpaceOnUse' },
+            h('stop', { offset: '0%', stopColor: '#7B9CFF' }),
+            h('stop', { offset: '100%', stopColor: '#9DB8FF' }))),
+        h('rect', { x: 0, y: 0, width: 32, height: 32, rx: 8, fill: 'url(#sg-logo-gradient)' }),
+        h('g', { fill: 'none', stroke: '#FFFFFF', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round' },
+          // 场景树：根节点向上分叉为三个场景节点
+          h('path', { d: 'M8.5 22.5v-5M8.5 17.5 5 14.2M8.5 17.5 12 14.2' }),
+          h('circle', { cx: 8.5, cy: 22.5, r: 2, fill: '#FFFFFF', stroke: 'none' }),
+          h('circle', { cx: 5, cy: 14.2, r: 1.8, fill: '#FFFFFF', stroke: 'none' }),
+          h('circle', { cx: 12, cy: 14.2, r: 1.8, fill: '#FFFFFF', stroke: 'none' }),
+          // 网关：双柱 + 开启斜线
+          h('path', { d: 'M17 20.5V10.5M23 20.5V10.5M17.8 10.5l4.4 8' }),
+          // skill：四角星
+          h('path', { d: 'M27.5 16c-.6 2.2-1.3 2.9-3.5 3.5 2.2.6 2.9 1.3 3.5 3.5.6-2.2 1.3-2.9 3.5-3.5-2.2-.6-2.9-1.3-3.5-3.5Z' }),
+        ),
+      );
+    }
+
+    function PanelMark() {
+      return h('span', { className: 'sg-panel-mark', title: 'Skill Gateway' }, h(GatewayLogo, { size: 28 }));
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* 场景树管理 tab                                                       */
+    /* ------------------------------------------------------------------ */
+
+    function SceneTreeNode({ catalog, scene, depth, query, collapsed, selectedId, onSelect, onToggle, onAddChild, onEdit, onDelete, onManageSkills, onSkillDetail, onDetachSkill }) {
+      const hasChildren = (scene.children || []).length > 0;
+      const isCollapsed = collapsed.has(scene.id);
+      const expanded = query ? true : !isCollapsed;
+      const selfMatched = !query || sceneSelfMatches(scene, query);
+      const visibleSkills = expanded
+        ? (selfMatched || !query
+            ? (scene.skills || [])
+            : (scene.skills || []).filter((skillName) => skillMetaMatches(catalog.skills[skillName], query)))
+        : [];
+      const sceneMatches = !query || sceneTreeMatches(catalog, scene.id, query);
+
+      if (query && !sceneMatches) return null;
+
+      const renderSkillRow = (skillName) => {
+        const skill = catalog.skills[skillName];
+        if (!skill) return null;
+        const paths = scenePathsForSkill(catalog, skillName);
+        const currentPath = scenePathOf(catalog, scene.id);
+        return h('div', {
+          className: 'sg-skill-row',
+          key: `skill-${scene.id}-${skillName}`,
+          style: { paddingLeft: 8 + (depth + 1) * 16 },
+          tabIndex: 0,
+          role: 'button',
+          onClick: () => onSkillDetail(skillName),
+          onKeyDown: (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onSkillDetail(skillName);
+            }
           },
-            h('div', { className: 'sg-indent', style: { width: depth * 14 } }),
-            hasChildren
+        },
+          h('span', { className: 'sg-tree-spacer' }),
+          h('span', { className: 'sg-tree-icon' }, h(Icon, { name: 'skill' })),
+          h('div', { className: 'sg-tree-main' },
+            h('div', { className: 'sg-tree-title-line' },
+              h('span', { className: 'sg-tree-title sg-mono' }, skill.name),
+              paths.length > 1 ? h('span', { className: 'sg-badge sg-neutral' }, `挂载 ${paths.length} 处`) : null),
+            h('div', { className: 'sg-tree-desc' }, skill.description || ''),
+            h('div', { className: 'sg-skill-scenes' },
+              h('span', { className: 'sg-path-chip', title: currentPath }, currentPath))),
+          h('div', { className: 'sg-tree-actions' },
+            h('button', {
+              className: 'sg-icon-btn',
+              title: '从当前场景解除挂载',
+              onClick: (event) => {
+                event.stopPropagation();
+                onDetachSkill(scene.id, skillName);
+              },
+            }, h(Icon, { name: 'close' }))));
+      };
+
+      return h('div', { className: 'sg-tree-node', key: scene.id },
+        h('div', {
+          className: cx('sg-tree-row', selectedId === scene.id && 'sg-is-selected'),
+          style: { paddingLeft: 8 + depth * 16 },
+          tabIndex: 0,
+          role: 'button',
+          onClick: () => onSelect(scene.id),
+          onKeyDown: (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onSelect(scene.id);
+            }
+          },
+        },
+          hasChildren
+            ? h('button', {
+                className: cx('sg-tree-caret', expanded && 'sg-is-expanded'),
+                type: 'button',
+                title: expanded ? '折叠' : '展开',
+                onClick: (event) => {
+                  event.stopPropagation();
+                  onToggle(scene.id);
+                },
+              }, h(Icon, { name: 'chevron-right' }))
+            : h('span', { className: 'sg-tree-spacer' }),
+          h('span', { className: 'sg-tree-icon' }, h(Icon, { name: 'folder' })),
+          h('div', { className: 'sg-tree-main' },
+            h('div', { className: 'sg-tree-title-line' },
+              h('span', { className: 'sg-tree-title' }, scene.name),
+              hasChildren ? h('span', { className: 'sg-badge sg-neutral' }, `${scene.children.length} 子场景`) : null,
+              (scene.skills || []).length ? h('span', { className: 'sg-badge sg-primary' }, `${scene.skills.length} 技能`) : null),
+            scene.description ? h('div', { className: 'sg-tree-desc' }, scene.description) : null,
+            (scene.tags || []).length
+              ? h('div', { className: 'sg-tree-tags' },
+                  scene.tags.map((tag) => h('span', { className: 'sg-tag', key: tag }, tag)))
+              : null),
+          h('div', { className: 'sg-tree-actions' },
+            h('button', {
+              className: 'sg-icon-btn',
+              type: 'button',
+              title: '新建子场景',
+              onClick: (event) => {
+                event.stopPropagation();
+                onAddChild(scene.id);
+              },
+            }, h(Icon, { name: 'plus' })),
+            h('button', {
+              className: 'sg-icon-btn',
+              type: 'button',
+              title: '管理场景挂载的技能',
+              onClick: (event) => {
+                event.stopPropagation();
+                onManageSkills(scene.id);
+              },
+            }, h(Icon, { name: 'link' })),
+            scene.id !== catalog.rootSceneId
               ? h('button', {
-                  className: 'sg-twisty',
+                  className: 'sg-icon-btn',
+                  type: 'button',
+                  title: '编辑场景',
                   onClick: (event) => {
                     event.stopPropagation();
+                    onEdit(scene.id);
+                  },
+                }, h(Icon, { name: 'edit' }))
+              : null,
+            scene.id !== catalog.rootSceneId
+              ? h('button', {
+                  className: 'sg-icon-btn sg-danger',
+                  type: 'button',
+                  title: '删除场景',
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    onDelete(scene.id);
+                  },
+                }, h(Icon, { name: 'trash' }))
+              : null)),
+        expanded ? visibleSkills.map(renderSkillRow) : null,
+        expanded ? (scene.children || []).map((childId) => {
+          const child = catalog.scenes[childId];
+          return child
+            ? h(SceneTreeNode, {
+                key: child.id,
+                catalog,
+                scene: child,
+                depth: depth + 1,
+                query,
+                collapsed,
+                selectedId,
+                onSelect,
+                onToggle,
+                onAddChild,
+                onEdit,
+                onDelete,
+                onManageSkills,
+                onSkillDetail,
+                onDetachSkill,
+              })
+            : null;
+        }) : null);
+    }
+
+    function SkillListCard({ catalog, query, onClearSearch, onUpload, onSkillDetail, onAttachSkill, onDeleteSkill }) {
+      const skills = Object.values(catalog.skills || {})
+        .filter((skill) => !query || skillMetaMatches(skill, query))
+        .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0) || a.name.localeCompare(b.name, 'en'));
+
+      if (!skills.length) {
+        return h('div', { className: 'sg-card' },
+          h('div', { className: 'sg-empty' },
+            h('div', { className: 'sg-empty-icon' }, h(Icon, { name: 'skill' })),
+            h('h3', { className: 'sg-empty-title' }, query ? '没有匹配的技能' : '目录中还没有技能'),
+            h('p', { className: 'sg-empty-desc' },
+              query ? '换个关键词试试。' : '上传场景树后，含 SKILL.md 的文件夹会自动识别为技能。'),
+            h('div', { className: 'sg-empty-actions' },
+              query
+                ? h('button', { className: 'sg-btn sg-btn-secondary', type: 'button', onClick: onClearSearch }, '清除搜索')
+                : null,
+              h('button', { className: 'sg-btn sg-btn-ghost', type: 'button', onClick: onUpload }, '上传场景树'))));
+      }
+
+      return h('div', { className: 'sg-card' },
+        h('div', { className: 'sg-table-head' },
+          h('span', { className: 'sg-table-title' }, '全部技能'),
+          h('span', { className: 'sg-table-count' }, `${skills.length} 个技能 · 挂载点可在详情中管理`)),
+        h('div', { className: 'sg-skill-list' },
+          skills.map((skill) => {
+            const paths = scenePathsForSkill(catalog, skill.name);
+            return h('div', {
+              className: 'sg-skill-list-item',
+              key: skill.name,
+              tabIndex: 0,
+              role: 'button',
+              onClick: () => onSkillDetail(skill.name),
+              onKeyDown: (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onSkillDetail(skill.name);
+                }
+              },
+            },
+              h('span', { className: 'sg-tree-icon' }, h(Icon, { name: 'skill' })),
+              h('div', { className: 'sg-skill-list-main' },
+                h('div', { className: 'sg-skill-name-line' },
+                  h('span', { className: 'sg-skill-name sg-mono' }, skill.name),
+                  paths.length
+                    ? h('span', { className: 'sg-badge sg-primary' }, `${paths.length} 个挂载点`)
+                    : h('span', { className: 'sg-badge sg-warning' }, '未挂载')),
+                h('div', { className: 'sg-skill-desc' }, skill.description || ''),
+                paths.length
+                  ? h('div', { className: 'sg-skill-scenes' },
+                      paths.map((path) => h('span', { className: 'sg-path-chip', title: path, key: path }, path)))
+                  : null),
+              h('div', { className: 'sg-skill-list-actions' },
+                h('button', {
+                  className: 'sg-icon-btn',
+                  type: 'button',
+                  title: '挂载到场景',
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    onAttachSkill(skill.name);
+                  },
+                }, h(Icon, { name: 'link' })),
+                h('button', {
+                  className: 'sg-icon-btn',
+                  type: 'button',
+                  title: '查看详情与文件',
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    onSkillDetail(skill.name);
+                  },
+                }, h(Icon, { name: 'eye' })),
+                h('button', {
+                  className: 'sg-icon-btn sg-danger',
+                  type: 'button',
+                  title: '删除技能',
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    onDeleteSkill(skill.name);
+                  },
+                }, h(Icon, { name: 'trash' }))));
+          })));
+    }
+
+    function LocationCard({ location, onRelocate }) {
+      let displayPath = location && location.dataDir ? location.dataDir : '.skillgate/';
+      if (location && location.cwd && location.dataDir && location.dataDir.startsWith(location.cwd)) {
+        displayPath = './' + location.dataDir.slice(location.cwd.length).replace(/^[\\/]+/, '');
+      }
+      const anchorText = location && location.hasAnchor ? '由 .skillgate-anchor 指向' : 'catalog.json · usage.json · config.json · skills/';
+      return h('div', { className: 'sg-card sg-location-card' },
+        h('span', { className: 'sg-location-icon' }, h(Icon, { name: 'database' })),
+        h('div', { className: 'sg-location-main' },
+          h('div', { className: 'sg-location-title' }, '数据落点'),
+          h('div', { className: 'sg-location-path', title: displayPath }, displayPath),
+          h('div', { className: 'sg-location-sub' }, anchorText)),
+        h('button', { className: 'sg-btn sg-btn-sm sg-btn-ghost', type: 'button', onClick: onRelocate }, '迁移'));
+    }
+
+    function CatalogTab(props) {
+      const { state, cwd, onChanged, notify, setModal } = props;
+      const catalog = state.catalog;
+      const [view, setView] = useState('tree');
+      const [query, setQuery] = useState('');
+      const [selectedId, setSelectedId] = useState(catalog.rootSceneId);
+      const [collapsed, setCollapsed] = useState(() => new Set());
+      const [busyAction, setBusyAction] = useState(null);
+
+      const selectedScene = catalog.scenes[selectedId] || catalog.scenes[catalog.rootSceneId];
+
+      useEffect(() => {
+        if (!catalog.scenes[selectedId]) setSelectedId(catalog.rootSceneId);
+      }, [catalog, selectedId]);
+
+      const refreshAfter = useCallback(async () => {
+        await onChanged();
+      }, [onChanged]);
+
+      const detachSkill = async (sceneId, skillName) => {
+        if (busyAction) return;
+        setBusyAction(`detach:${sceneId}:${skillName}`);
+        try {
+          const result = await api('POST', withCwd('/skill-gateway/scenes/skills', cwd), {
+            action: 'detach',
+            sceneId,
+            skillName,
+            cwd,
+          });
+          notify(result.ok ? `已从「${catalog.scenes[sceneId].name}」解链 ${skillName}` : (result.error || '解链失败'), result.ok ? 'success' : 'danger');
+          if (result.ok) await refreshAfter();
+        } catch (error) {
+          notify(error.message, 'danger');
+        } finally {
+          setBusyAction(null);
+        }
+      };
+
+      const searchText = query.trim();
+      const treeRoot = catalog.scenes[catalog.rootSceneId];
+
+      return h('div', { className: 'sg-panel-section' },
+        h('div', { className: 'sg-section-head' },
+          h('div', null,
+            h('h2', { className: 'sg-section-title' }, '场景树管理'),
+            h('p', { className: 'sg-section-sub' }, '单根、不限深度；技能可挂载到多个场景。')),
+          h('div', { className: 'sg-section-actions' },
+            h('button', {
+              className: 'sg-btn sg-btn-sm sg-btn-ghost',
+              type: 'button',
+              onClick: () => setModal({ type: 'upload', payload: null }),
+            }, h(Icon, { name: 'upload' }), '上传场景树'),
+            h('button', {
+              className: 'sg-btn sg-btn-sm sg-btn-secondary',
+              type: 'button',
+              onClick: () => setModal({
+                type: 'scene-create',
+                payload: {
+                  parentId: selectedId,
+                  onCreated: (newSceneId, parentId) => {
+                    setSelectedId(newSceneId);
                     setCollapsed((prev) => {
                       const next = new Set(prev);
-                      if (next.has(scene.id)) next.delete(scene.id);
-                      else next.add(scene.id);
+                      next.delete(parentId);
                       return next;
                     });
                   },
-                }, isCollapsed ? '▸' : '▾')
-              : h('span', { className: 'sg-twisty' }),
-            h('button', { className: 'sg-tree-name', title: scene.name }, scene.name),
-            h('span', { className: 'sg-tree-meta' }, `${(scene.children || []).length}子 · ${(scene.skills || []).length}技`),
-            h('span', { className: 'sg-tree-actions' },
-              h('button', { className: 'sg-btn sg-btn-sm', onClick: (event) => { event.stopPropagation(); onAddChild(scene.id); } }, '+'),
-              scene.id !== catalog.rootSceneId
-                ? h('button', { className: 'sg-btn sg-btn-sm sg-btn-danger', onClick: (event) => { event.stopPropagation(); onDeleteScene(scene); } }, '删')
-                : null)),
-          hasChildren && !isCollapsed
-            ? (scene.children || []).map((childId) => renderScene(catalog.scenes[childId], depth + 1))
-            : null);
-      };
-      return h('div', { className: 'sg-tree' }, renderScene(catalog.scenes[catalog.rootSceneId], 0));
+                },
+              }),
+            }, h(Icon, { name: 'plus' }), '新建场景'))),
+        h('div', { className: 'sg-segmented sg-sm sg-view-switch' },
+          h('button', {
+            type: 'button',
+            className: view === 'tree' ? 'sg-is-active' : undefined,
+            onClick: () => setView('tree'),
+          }, '场景树'),
+          h('button', {
+            type: 'button',
+            className: view === 'skills' ? 'sg-is-active' : undefined,
+            onClick: () => setView('skills'),
+          }, '全部技能')),
+        h('label', { className: 'sg-search' },
+          h(Icon, { name: 'search' }),
+          h('input', {
+            type: 'search',
+            value: query,
+            placeholder: '搜索场景名称、描述、标签或技能',
+            onChange: (event) => setQuery(event.target.value),
+          })),
+        view === 'tree'
+          ? (searchText && !sceneTreeMatches(catalog, catalog.rootSceneId, searchText)
+              ? h('div', { className: 'sg-card' },
+                  h('div', { className: 'sg-empty' },
+                    h('div', { className: 'sg-empty-icon' }, h(Icon, { name: 'search' })),
+                    h('h3', { className: 'sg-empty-title' }, '没有匹配的场景或技能'),
+                    h('p', { className: 'sg-empty-desc' }, '换个关键词，或先创建场景、上传场景树。'),
+                    h('div', { className: 'sg-empty-actions' },
+                      h('button', {
+                        className: 'sg-btn sg-btn-secondary',
+                        type: 'button',
+                        onClick: () => setQuery(''),
+                      }, '清除搜索'))))
+              : h('div', { className: 'sg-card sg-tree-card' },
+                  h(SceneTreeNode, {
+                    key: treeRoot ? treeRoot.id : 'missing',
+                    catalog,
+                    scene: treeRoot,
+                    depth: 0,
+                    query: searchText,
+                    collapsed,
+                    selectedId,
+                    onSelect: setSelectedId,
+                    onToggle: (sceneId) => {
+                      setCollapsed((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(sceneId)) next.delete(sceneId);
+                        else next.add(sceneId);
+                        return next;
+                      });
+                    },
+                    onAddChild: (parentId) => setModal({
+                      type: 'scene-create',
+                      payload: {
+                        parentId,
+                        onCreated: (newSceneId, createdParentId) => {
+                          setSelectedId(newSceneId);
+                          setCollapsed((prev) => {
+                            const next = new Set(prev);
+                            next.delete(createdParentId);
+                            return next;
+                          });
+                        },
+                      },
+                    }),
+                    onEdit: (sceneId) => setModal({ type: 'scene-edit', payload: { sceneId } }),
+                    onDelete: (sceneId) => setModal({ type: 'delete-scene', payload: { sceneId } }),
+                    onManageSkills: (sceneId) => setModal({ type: 'skill-picker', payload: { sceneId } }),
+                    onSkillDetail: (skillName) => setModal({ type: 'skill-detail', payload: { skillName } }),
+                    onDetachSkill: detachSkill,
+                  })))
+          : h(SkillListCard, {
+              catalog,
+              query: searchText,
+              onClearSearch: () => setQuery(''),
+              onUpload: () => setModal({ type: 'upload', payload: null }),
+              onSkillDetail: (skillName) => setModal({ type: 'skill-detail', payload: { skillName } }),
+              onAttachSkill: (skillName) => setModal({ type: 'attach-skill', payload: { skillName } }),
+              onDeleteSkill: (skillName) => setModal({ type: 'delete-skill', payload: { skillName } }),
+            }),
+        h(LocationCard, {
+          location: state.location,
+          onRelocate: () => setModal({ type: 'relocate', payload: null }),
+        }));
     }
 
-    function UploadReport({ items }) {
-      if (!items || !items.length) return null;
-      const ok = items.every((item) => item.ok);
-      return h('div', { className: 'sg-upload-report' + (ok ? ' sg-ok' : '') },
-        h('div', null, ok ? '场景树上传完成' : '场景树上传失败'),
-        h('ul', null, items.map((item, index) =>
-          h('li', { key: index, className: item.ok ? undefined : 'sg-reason' },
-            `${item.name || '(未命名)'}: ${item.summary || (item.reasons || [item.error]).join('；')}`))));
-    }
+    /* ------------------------------------------------------------------ */
+    /* 统计 tab                                                             */
+    /* ------------------------------------------------------------------ */
 
-    function CatalogTab({ state, cwd, refresh, notify }) {
-      const catalog = state.catalog;
-      const [selectedId, setSelectedId] = useState(catalog.rootSceneId);
-      const [form, setForm] = useState({ name: '', description: '', tags: '' });
-      const [attachSkill, setAttachSkill] = useState('');
-      const [report, setReport] = useState([]);
-      const selected = catalog.scenes[selectedId] || catalog.scenes[catalog.rootSceneId];
-
-      useEffect(() => {
-        if (selected) {
-          setForm({ name: selected.name || '', description: selected.description || '', tags: (selected.tags || []).join(', ') });
-        }
-      }, [selectedId, state]);
-
-      const saveScene = async () => {
-        await api('POST', withCwd('/skill-gateway/scenes', cwd), { action: 'update', sceneId: selected.id, input: form, cwd });
-        notify(`已保存场景「${form.name}」`);
-        await refresh();
-      };
-      const addChild = async (parentId) => {
-        const childName = window.prompt('新场景名称：');
-        if (!childName) return;
-        const result = await api('POST', withCwd('/skill-gateway/scenes', cwd), { action: 'create', parentId, input: { name: childName, description: '', tags: [] }, cwd });
-        notify(result.ok ? `已创建场景「${childName}」` : (result.error || '创建失败'));
-        await refresh();
-      };
-      const deleteScene = async (scene) => {
-        if (!window.confirm(`删除场景「${scene.name}」及其所有子场景？其中的技能只会被解链，不会被删除。`)) return;
-        const result = await api('POST', withCwd('/skill-gateway/scenes', cwd), { action: 'delete', sceneId: scene.id, cwd });
-        notify(result.ok ? `已删除场景「${scene.name}」` : (result.error || '删除失败'));
-        setSelectedId(catalog.rootSceneId);
-        await refresh();
-      };
-      const doAttach = async () => {
-        if (!attachSkill) return;
-        const result = await api('POST', withCwd('/skill-gateway/scenes/skills', cwd), { action: 'attach', sceneId: selected.id, skillName: attachSkill, cwd });
-        notify(result.ok ? `已把 ${attachSkill} 挂载到「${selected.name}」` : (result.error || '挂载失败'));
-        await refresh();
-      };
-      const detach = async (skillName) => {
-        const result = await api('POST', withCwd('/skill-gateway/scenes/skills', cwd), { action: 'detach', sceneId: selected.id, skillName, cwd });
-        notify(`已从「${selected.name}」解链 ${skillName}`);
-        await refresh();
-      };
-      const deleteSkill = async (skillName) => {
-        if (!window.confirm(`删除技能「${skillName}」？它会从所有场景解链并删除文件，历史统计保留。`)) return;
-        const result = await api('POST', withCwd('/skill-gateway/skills/delete', cwd), { skillName, cwd });
-        notify(result.ok ? `已删除技能「${skillName}」` : (result.error || '删除失败'));
-        await refresh();
-      };
-
-      const uploadSceneTree = async (name, files) => {
-        let item;
-        try {
-          const result = await api('POST', withCwd('/skill-gateway/scene-tree/upload', cwd), { item: { name, files }, cwd });
-          if (!result.ok) {
-            item = result;
-          } else {
-            const counts = result.sceneCounts || {};
-            const parts = [
-              `新增场景 ${counts.created || 0} 个`,
-              `复用场景 ${counts.reused || 0} 个`,
-              `导入技能 ${result.skillsImported || 0} 个`,
-              `覆盖更新 ${result.skillsUpdated || 0} 个`,
-            ];
-            item = { ok: true, name: name || result.name, summary: parts.join(' · ') };
-          }
-        } catch (error) {
-          item = { ok: false, name, error: error.message };
-        }
-        setReport([item]);
-        notify(item.ok ? `场景树「${name}」上传完成` : `场景树「${name}」上传失败`);
-        await refresh();
-      };
-      const onFolder = async (event) => {
-        const input = event.target;
-        const files = [...(input.files || [])];
-        if (!files.length) {
-          setReport([{ ok: false, name: '场景树文件夹', reasons: ['文件夹为空。'] }]);
-          input.value = '';
-          return;
-        }
-        const roots = new Set();
-        const uploadedFiles = [];
-        try {
-          for (const file of files) {
-            const rel = file.webkitRelativePath || file.name;
-            const parts = rel.split('/').filter(Boolean);
-            if (!parts.length) continue;
-            roots.add(parts[0]);
-            uploadedFiles.push({ path: rel, content: await file.text() });
-          }
-        } catch (error) {
-          input.value = '';
-          setReport([{ ok: false, name: '场景树文件夹', error: error.message }]);
-          return;
-        }
-        input.value = '';
-        if (roots.size !== 1) {
-          setReport([{ ok: false, name: '场景树文件夹', reasons: ['一次只能选择一个场景树文件夹。'] }]);
-          return;
-        }
-        await uploadSceneTree([...roots][0], uploadedFiles);
-      };
-
-      const skillNames = Object.keys(catalog.skills || {}).sort();
-      return h('div', { className: 'sg-grid2' },
-        h('div', null,
-          h('section', { className: 'sg-card' },
-            h('div', { className: 'sg-card-head' },
-              h('h3', null, '场景树'),
-              h('span', { className: 'sg-card-sub' }, `${Object.keys(catalog.scenes || {}).length} scenes`)),
-            h(SceneTree, { catalog, selectedId, onSelect: setSelectedId, onAddChild: addChild, onDeleteScene: deleteScene })),
-          h('section', { className: 'sg-card' },
-            h('div', { className: 'sg-card-head' }, h('h3', null, '上传场景树')),
-            h('div', { className: 'sg-toolbar' },
-              h('label', { className: 'sg-btn', htmlFor: 'sg-folder-input' }, '选择场景树文件夹'),
-              h('input', { id: 'sg-folder-input', type: 'file', webkitdirectory: '', style: { display: 'none' }, onChange: onFolder })),
-            h('div', { className: 'sg-help' }, '所选文件夹作为场景树根目录：没有 SKILL.md 的文件夹识别为场景，含 SKILL.md 的文件夹整体导入为技能。相同场景复用，同名技能覆盖更新。'),
-            h(UploadReport, { items: report }))),
-        h('div', null,
-          h('section', { className: 'sg-card' },
-            h('div', { className: 'sg-card-head' },
-              h('h3', null, '场景信息'),
-              h('span', { className: 'sg-card-sub' }, selected.path || selected.name)),
-            h('div', { className: 'sg-field' },
-              h('label', null, 'name'),
-              h('input', { className: 'sg-input', value: form.name, onChange: (event) => setForm({ ...form, name: event.target.value }), placeholder: '场景名称' })),
-            h('div', { className: 'sg-field' },
-              h('label', null, 'description'),
-              h('textarea', { className: 'sg-textarea', value: form.description, onChange: (event) => setForm({ ...form, description: event.target.value }), placeholder: '描述这个场景的工作目的' })),
-            h('div', { className: 'sg-field' },
-              h('label', null, 'tags'),
-              h('input', { className: 'sg-input', value: form.tags, onChange: (event) => setForm({ ...form, tags: event.target.value }), placeholder: '逗号分隔，如 backend, server' })),
-            h('div', { className: 'sg-toolbar', style: { justifyContent: 'flex-end' } },
-              h('button', { className: 'sg-btn sg-btn-primary', onClick: saveScene }, '保存场景')),
-            h('div', { className: 'sg-section-label' }, '直接挂载的技能'),
-            (selected.skills || []).length
-              ? h('div', { className: 'sg-chip-row' }, selected.skills.map((skillName) =>
-                  h('span', { className: 'sg-chip', key: skillName },
-                    skillName,
-                    h('button', { onClick: () => detach(skillName), 'aria-label': `解链 ${skillName}` }, '×'))))
-              : h('div', { className: 'sg-empty', style: { padding: 9 } }, '这个场景还没有直接挂载技能。'),
-            h('div', { className: 'sg-section-label' }, '挂载技能到当前场景'),
-            h('div', { className: 'sg-attach-row' },
-              h('select', { className: 'sg-select', value: attachSkill, onChange: (event) => setAttachSkill(event.target.value) },
-                h('option', { value: '' }, '— 选择要挂载的技能 —'),
-                skillNames.map((skillName) => h('option', { key: skillName, value: skillName }, skillName))),
-              h('button', { className: 'sg-btn sg-btn-primary', onClick: doAttach, disabled: !attachSkill }, '挂载')),
-            selected.id !== catalog.rootSceneId
-              ? h('div', { className: 'sg-danger' },
-                  h('p', null, '删除场景会级联删除其所有子场景；场景中的技能只会被解链。'),
-                  h('button', { className: 'sg-btn sg-btn-danger sg-btn-sm', onClick: () => deleteScene(selected) }, '删除当前场景'))
-              : null),
-          h('section', { className: 'sg-card' },
-            h('div', { className: 'sg-card-head' },
-              h('h3', null, '技能目录'),
-              h('span', { className: 'sg-card-sub' }, `${skillNames.length} skills`)),
-            skillNames.length
-              ? h('div', { className: 'sg-skill-list' }, skillNames.map((skillName) => {
-                  const skill = catalog.skills[skillName];
-                  const paths = scenePathsForSkill(catalog, skillName);
-                  return h('div', { className: 'sg-skill-row', key: skillName },
-                    h('div', { className: 'sg-skill-main' },
-                      h('div', { className: 'sg-skill-title' },
-                        h('strong', null, skillName),
-                        h('span', { className: 'sg-file-count' }, `${skill.updatedAt ? 'updated ' + fmtTime(skill.updatedAt) : ''}`)),
-                      h('p', null, skill.description || ''),
-                      h('div', { className: 'sg-skill-paths' }, paths.length ? paths.join('  ·  ') : '未挂载到任何场景')),
-                    h('button', { className: 'sg-btn sg-btn-sm sg-btn-danger', onClick: () => deleteSkill(skillName) }, '删除'));
-                }))
-              : h('div', { className: 'sg-empty' }, '还没有技能。上传一个场景树文件夹开始。'))));
-    }
-
-    function StatsTab({ cwd, sessionId }) {
+    function StatsTab({ cwd, sessionId, setTab, active }) {
       const [source, setSource] = useState('all');
-      const [stats, setStats] = useState({ usage: [], stats: { total: 0, skills: [], scenes: [] } });
-      const refresh = useCallback(async () => {
-        const query = `${withCwd('/skill-gateway/stats', cwd)}${cwd ? '&' : '?'}source=${encodeURIComponent(source)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ''}`;
-        setStats(await api('GET', query));
-      }, [cwd, source, sessionId]);
-      useEffect(() => { refresh().catch(() => {}); }, [refresh]);
-      const aggregate = stats.stats || { total: 0, skills: [], scenes: [] };
-      const timeline = [...(stats.usage || [])].sort((a, b) => b.timestamp - a.timestamp);
-      const maxSkillCount = aggregate.skills.length ? aggregate.skills[0].count : 1;
-      const maxSceneCount = aggregate.scenes.length ? aggregate.scenes[0].count : 1;
-      const tableRows = (entries, key, max) => entries.map((entry, index) =>
-        h('tr', { key: entry[key] + index },
-          h('td', null,
-            h('div', { className: 'sg-stat-name' }, entry[key]),
-            h('div', { className: 'sg-bar', style: { width: Math.max(8, Math.round((entry.count / max) * 92)) } })),
-          h('td', { className: 'sg-stat-num' }, entry.count),
-          h('td', { className: 'sg-stat-share' }, fmtShare(entry.share)),
-          h('td', { className: 'sg-stat-share' }, fmtTime(entry.lastUsed))));
-      return h('div', null,
-        h('div', { className: 'sg-stats-toolbar' },
-          h('span', { className: 'sg-card-sub' }, '来源'),
-          h('div', { className: 'sg-chips' },
-            [['all', '全部'], ['gateway', 'gateway'], ['agent-skills', 'agent-skills']].map(([value, label]) =>
-              h('button', { key: value, className: source === value ? 'sg-active' : undefined, onClick: () => setSource(value) }, label))),
-          h('span', { className: 'sg-card-sub', style: { marginLeft: 'auto' } }, `工作区共 ${aggregate.total} 次使用`)),
-        h('div', { className: 'sg-stats-grid' },
-          h('section', { className: 'sg-card sg-timeline-card' },
-            h('div', { className: 'sg-card-head' },
-              h('h3', null, '会话内时间线'),
-              h('span', { className: 'sg-card-sub' }, `当前会话 ${timeline.length} 条`)),
-            timeline.length
-              ? h('div', { className: 'sg-timeline' },
-                  timeline.map((record) =>
-                    h('div', { className: 'sg-timeline-item', key: record.id },
-                      h('span', { className: 'sg-timeline-time' }, fmtTime(record.timestamp)),
-                      h('div', { className: 'sg-timeline-main' },
-                        h('strong', null, record.skillName),
-                        h('span', { className: 'sg-source ' + (record.source === 'gateway' ? 'sg-source-gateway' : 'sg-source-agent') }, record.source),
-                        h('div', { className: 'sg-timeline-path' }, record.scenePath || '无场景路径（默认技能来源）'),
-                      ),
-                    ),
-                  ),
-                )
-              : h('div', { className: 'sg-result-empty' }, '该来源筛选下暂无使用记录。')),
-          h('section', { className: 'sg-card' },
-            h('div', { className: 'sg-card-head' },
-              h('h3', null, '全局统计 / 按技能'),
-              h('span', { className: 'sg-card-sub' }, `工作区 ${aggregate.total} 次使用`)),
-            aggregate.skills.length
-              ? h('div', { className: 'sg-table-scroll' },
-                  h('table', { className: 'sg-table' },
-                    h('thead', null, h('tr', null,
-                      h('th', null, '技能'), h('th', null, '次数'), h('th', null, '占比'), h('th', null, '最近使用'))),
-                    h('tbody', null, tableRows(aggregate.skills, 'skillName', maxSkillCount))))
-              : h('div', { className: 'sg-result-empty' }, '暂无聚合数据。'),
-            h('div', { className: 'sg-note' }, '统计只看来源筛选结果；技能删除后历史记录仍保留。')),
-          h('section', { className: 'sg-card' },
-            h('div', { className: 'sg-card-head' },
-              h('h3', null, '全局统计 / 按场景'),
-              h('span', { className: 'sg-card-sub' }, 'scenePath 聚合')),
-            aggregate.scenes.length
-              ? h('div', { className: 'sg-table-scroll' },
-                  h('table', { className: 'sg-table' },
-                    h('thead', null, h('tr', null,
-                      h('th', null, '场景路径'), h('th', null, '次数'), h('th', null, '占比'), h('th', null, '最近使用'))),
-                    h('tbody', null, tableRows(aggregate.scenes, 'scenePath', maxSceneCount))))
-              : h('div', { className: 'sg-result-empty' }, '暂无带场景路径的使用记录。'),
-            h('div', { className: 'sg-note' }, 'agent-skills 来源通常没有 scenePath，只出现在按技能统计中。'))));
-    }
+      const [stats, setStats] = useState(null);
+      const [error, setError] = useState('');
 
-    function GatewayTab({ state, cwd, sessionId, onChanged, notify }) {
-      const catalog = state.catalog;
-      const [action, setAction] = useState('browse');
-      const [browseSceneId, setBrowseSceneId] = useState(catalog.rootSceneId);
-      const [loadSkill, setLoadSkill] = useState(Object.keys(catalog.skills || {})[0] || '');
-      const [scenePath, setScenePath] = useState('');
-      const [result, setResult] = useState(null);
-      const [busy, setBusy] = useState(false);
-      const sceneIds = Object.keys(catalog.scenes || {}).sort();
-      const skillNames = Object.keys(catalog.skills || {}).sort();
-      const loadPaths = scenePathsForSkill(catalog, loadSkill);
+      const refresh = useCallback(async () => {
+        const data = await api('GET', withParams(withCwd('/skill-gateway/stats', cwd), {
+          source,
+          sessionId,
+        }));
+        setStats(data);
+        setError('');
+      }, [cwd, source, sessionId]);
 
       useEffect(() => {
-        if (!scenePath && loadPaths.length) setScenePath(loadPaths[0]);
-      }, [loadSkill, loadPaths, scenePath]);
+        if (!active) return;
+        refresh().catch((err) => setError(err.message));
+      }, [active, refresh]);
 
-      const run = async () => {
+      const aggregate = stats && stats.stats ? stats.stats : { total: 0, skills: [], scenes: [] };
+      const timeline = stats ? [...(stats.usage || [])].sort((a, b) => Number(b.timestamp) - Number(a.timestamp)) : [];
+      const sessionTotal = stats ? stats.sessionTotal : 0;
+      const workspaceTotal = stats ? stats.workspaceTotal : 0;
+
+      const tableRows = (entries, key) => entries.map((entry) => {
+        const max = entries.length ? entries[0].count : 1;
+        return h('tr', { key: `${key}-${entry[key]}` },
+          h('td', null,
+            h('span', { className: 'sg-primary-cell sg-mono' }, entry[key]),
+            h('div', { className: 'sg-cell-progress sg-progress' },
+              h('span', { className: 'sg-progress-track' },
+                h('span', {
+                  className: 'sg-progress-fill',
+                  style: { width: `${Math.max(entry.count ? 3 : 0, (Number(entry.share) || 0) * 100)}%` },
+                })),
+              h('span', { className: 'sg-progress-text' }, fmtShare(entry.share)))),
+          h('td', { className: 'sg-num' }, entry.count),
+          h('td', null, fmtShare(entry.share)),
+          h('td', { className: 'sg-num' }, fmtRelative(entry.lastUsed)));
+      });
+
+      if (!stats) {
+        if (error) {
+          return h('div', { className: 'sg-card' },
+            h('div', { className: 'sg-notice sg-danger' }, h(Icon, { name: 'error' }), error));
+        }
+        return h('div', { className: 'sg-card' },
+          h('div', { className: 'sg-empty' },
+            h('div', { className: 'sg-empty-icon' }, h(Icon, { name: 'stats' })),
+            h('h3', { className: 'sg-empty-title' }, '正在读取统计…')));
+      }
+
+      return h('div', { className: 'sg-panel-section' },
+        error ? h('div', { className: 'sg-notice sg-danger' }, h(Icon, { name: 'error' }), error) : null,
+        h('div', { className: 'sg-section-head' },
+          h('div', null,
+            h('h2', { className: 'sg-section-title' }, '统计'),
+            h('p', { className: 'sg-section-sub' }, '会话内时间线 + 仓库级全局聚合；来源可过滤。'))),
+        h('div', { className: 'sg-segmented sg-sm' },
+          [['all', '全部'], ['gateway', 'gateway'], ['agent-skills', 'agent-skills']].map(([value, label]) =>
+            h('button', {
+              key: value,
+              type: 'button',
+              className: source === value ? 'sg-is-active' : undefined,
+              onClick: () => setSource(value),
+            }, label))),
+        h('div', { className: 'sg-stat-cards' },
+          h('div', { className: 'sg-card sg-stat-card' },
+            h('div', { className: 'sg-stat-label' }, '本会话使用'),
+            h('div', { className: 'sg-stat-value' }, sessionTotal),
+            h('div', { className: 'sg-stat-foot' }, source === 'all' ? 'gateway 与 agent-skills 合计' : `来源过滤：${source}`)),
+          h('div', { className: 'sg-card sg-stat-card' },
+            h('div', { className: 'sg-stat-label' }, '仓库累计使用'),
+            h('div', { className: 'sg-stat-value' }, workspaceTotal),
+            h('div', { className: 'sg-stat-foot' }, '所有会话 · 所有时间'))),
+        workspaceTotal
+          ? h('div', null,
+              h('div', { className: 'sg-card sg-table-card' },
+                h('div', { className: 'sg-table-head' },
+                  h('span', { className: 'sg-table-title' }, '全局统计 · 按技能'),
+                  h('span', { className: 'sg-table-count' }, `${aggregate.skills.length} 个技能 / ${aggregate.total} 次触发`)),
+                aggregate.skills.length
+                  ? h('div', { className: 'sg-table-wrap' },
+                      h('table', { className: 'sg-data-table' },
+                        h('thead', null,
+                          h('tr', null,
+                            h('th', null, '技能'), h('th', { className: 'sg-num' }, '次数'), h('th', null, '占比'), h('th', { className: 'sg-num' }, '最近使用'))),
+                        h('tbody', null, tableRows(aggregate.skills, 'skillName'))))
+                  : h('div', { className: 'sg-empty' }, h('h3', { className: 'sg-empty-title' }, '暂无聚合数据。'))),
+              h('div', { className: 'sg-card sg-table-card' },
+                h('div', { className: 'sg-table-head' },
+                  h('span', { className: 'sg-table-title' }, '全局统计 · 按场景'),
+                  h('span', { className: 'sg-table-count' }, `${aggregate.scenes.length} 个场景路径`)),
+                aggregate.scenes.length
+                  ? h('div', { className: 'sg-table-wrap' },
+                      h('table', { className: 'sg-data-table' },
+                        h('thead', null,
+                          h('tr', null,
+                            h('th', null, '场景路径'), h('th', { className: 'sg-num' }, '次数'), h('th', null, '占比'), h('th', { className: 'sg-num' }, '最近使用'))),
+                        h('tbody', null, tableRows(aggregate.scenes, 'scenePath'))))
+                  : h('div', { className: 'sg-empty' }, h('h3', { className: 'sg-empty-title' }, '暂无带场景路径的使用记录。'))),
+              h('div', { className: 'sg-card sg-table-card' },
+                h('div', { className: 'sg-table-head' },
+                  h('span', { className: 'sg-table-title' }, '会话内使用时间线'),
+                  h('span', { className: 'sg-table-count' }, `${timeline.length} 条 · 当前会话`)),
+                timeline.length
+                  ? h('ol', { className: 'sg-timeline' },
+                      timeline.map((record) => h('li', {
+                        className: cx('sg-timeline-item', record.source === 'agent-skills' && 'sg-agent'),
+                        key: record.id || `${record.timestamp}-${record.skillName}`,
+                      },
+                        h('div', { className: 'sg-timeline-line' },
+                          h('span', { className: 'sg-timeline-time' }, fmtClock(record.timestamp)),
+                          h('span', { className: 'sg-timeline-skill sg-mono' }, record.skillName),
+                          record.source === 'gateway'
+                            ? h('span', { className: 'sg-badge sg-primary' }, 'gateway')
+                            : h('span', { className: 'sg-badge sg-neutral' }, 'agent-skills')),
+                        record.scenePath
+                          ? h('div', { className: 'sg-timeline-path' }, h(Icon, { name: 'folder' }), record.scenePath)
+                          : h('div', { className: 'sg-timeline-path' }, 'harness 默认技能加载，无场景路径'))))
+                  : h('div', { className: 'sg-empty' }, h('h3', { className: 'sg-empty-title' }, '该来源筛选下暂无使用记录。'))))
+          : h('div', { className: 'sg-card' },
+              h('div', { className: 'sg-empty' },
+                h('div', { className: 'sg-empty-icon' }, h(Icon, { name: 'stats' })),
+                h('h3', { className: 'sg-empty-title' }, source === 'all' ? '还没有使用记录' : '该来源下没有记录'),
+                h('p', { className: 'sg-empty-desc' }, 'gateway load 与 harness 默认 skill 调用都会被观察器记录；开关关闭时统计仍然生效。'),
+                h('div', { className: 'sg-empty-actions' },
+                  h('button', {
+                    className: 'sg-btn sg-btn-secondary',
+                    type: 'button',
+                    onClick: () => setTab('gateway'),
+                  }, '去网关取用演示')))));
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* 网关取用 tab（只 browse，不提供页面端“加载全文”）                    */
+    /* ------------------------------------------------------------------ */
+
+    function GatewayTab({ state, notify }) {
+      const catalog = state.catalog;
+      const [stack, setStack] = useState([catalog.rootSceneId]);
+
+      useEffect(() => {
+        setStack([catalog.rootSceneId]);
+      }, [catalog.rootSceneId]);
+
+      useEffect(() => {
+        const currentId = stack[stack.length - 1];
+        if (currentId && !catalog.scenes[currentId]) setStack([catalog.rootSceneId]);
+      }, [catalog, stack]);
+
+      const currentId = stack[stack.length - 1] || catalog.rootSceneId;
+      const result = browseFromCatalog(catalog, currentId);
+      if (!result.ok) {
+        return h('div', { className: 'sg-card' },
+          h('div', { className: 'sg-notice sg-danger' }, h(Icon, { name: 'error' }), result.error));
+      }
+
+      const enabled = state.config.enabled;
+      const breadcrumbParts = result.path.split(' / ');
+      const enter = (sceneId) => {
+        if (!enabled) return notify('skill gateway 已关闭。', 'warning');
+        setStack((prev) => [...prev, sceneId]);
+      };
+
+      return h('div', { className: 'sg-panel-section' },
+        h('div', { className: 'sg-section-head' },
+          h('div', null,
+            h('h2', { className: 'sg-section-title' }, '网关取用'),
+            h('p', { className: 'sg-section-sub' }, '逐层 browse 场景树，选定后由 Agent 调用 load 取用技能。'))),
+        enabled
+          ? h('div', { className: 'sg-notice sg-info' },
+              h(Icon, { name: 'info' }),
+              h('span', null, h('b', null, '开关 ON：'), 'skill_gateway 工具已注册，系统提示词已注入。'))
+          : h('div', { className: 'sg-notice sg-danger' },
+              h(Icon, { name: 'error' }),
+              h('div', null,
+                '开关 OFF：工具与提示词已卸下。',
+                h('pre', { className: 'sg-prompt-pre' }, JSON.stringify({ ok: false, action: 'browse', error: 'skill gateway 已关闭。', usageRecorded: false }, null, 2)))),
+        h('div', { className: 'sg-card' },
+          h('div', { className: 'sg-table-head', style: { padding: '0 0 10px' } },
+            h('div', { className: 'sg-breadcrumb' },
+              breadcrumbParts.map((part, index) => h('span', { key: `${part}-${index}`, className: index === breadcrumbParts.length - 1 ? 'sg-current' : undefined },
+                index ? h(Icon, { name: 'chevron-right' }) : null, part))),
+            h('div', { style: { display: 'flex', gap: 8, flex: '0 0 auto' } },
+              stack.length > 1
+                ? h('button', {
+                    className: 'sg-btn sg-btn-sm sg-btn-ghost',
+                    type: 'button',
+                    disabled: !enabled,
+                    onClick: () => setStack((prev) => prev.slice(0, -1)),
+                  }, h(Icon, { name: 'arrow-left' }), '后退')
+                : null,
+              result.parentId
+                ? h('button', {
+                    className: 'sg-btn sg-btn-sm sg-btn-ghost',
+                    type: 'button',
+                    disabled: !enabled,
+                    onClick: () => setStack((prev) => [...prev, result.parentId]),
+                  }, h(Icon, { name: 'arrow-up' }), '父场景')
+                : null,
+              stack.length > 1
+                ? h('button', {
+                    className: 'sg-btn sg-btn-sm sg-btn-secondary',
+                    type: 'button',
+                    disabled: !enabled,
+                    onClick: () => setStack([catalog.rootSceneId]),
+                  }, '根场景')
+                : null)),
+          h('p', { className: 'sg-gateway-scene-desc' }, result.description || ''),
+          (result.tags || []).length
+            ? h('div', { className: 'sg-tree-tags', style: { marginTop: 8 } },
+                result.tags.map((tag) => h('span', { className: 'sg-tag', key: tag }, tag)))
+            : null),
+        h('div', { className: 'sg-card' },
+          h('div', { className: 'sg-table-head', style: { padding: '0 0 10px' } },
+            h('span', { className: 'sg-table-title' }, '直接子场景'),
+            h('span', { className: 'sg-table-count' }, `${result.children.length} 个`)),
+          result.children.length
+            ? h('div', { className: 'sg-gateway-list' },
+                result.children.map((child) => h('div', { className: 'sg-gateway-item', key: child.id },
+                  h('span', { className: 'sg-tree-icon' }, h(Icon, { name: 'folder' })),
+                  h('div', { className: 'sg-gateway-item-main' },
+                    h('div', { className: 'sg-gateway-item-title' }, child.name),
+                    h('div', { className: 'sg-gateway-item-desc' }, child.description || ''),
+                    h('div', { className: 'sg-gateway-item-meta' },
+                      h('span', { className: 'sg-badge sg-neutral' }, `${child.childCount} 子场景`),
+                      h('span', { className: 'sg-badge sg-primary' }, `${child.skillCount} 直接技能`))),
+                  h('button', {
+                    className: 'sg-btn sg-btn-sm sg-btn-secondary',
+                    type: 'button',
+                    disabled: !enabled,
+                    onClick: () => enter(child.id),
+                  }, '进入'))))
+            : h('div', { className: 'sg-notice sg-info' }, h(Icon, { name: 'info' }), '当前场景没有直接子场景。')),
+        h('div', { className: 'sg-card' },
+          h('div', { className: 'sg-table-head', style: { padding: '0 0 10px' } },
+            h('span', { className: 'sg-table-title' }, '直接挂载的技能'),
+            h('span', { className: 'sg-table-count' }, `${result.skills.length} 个 · 由 Agent 经网关取用`)),
+          result.skills.length
+            ? h('div', { className: 'sg-gateway-list' },
+                result.skills.map((skill) => h('div', { className: 'sg-gateway-item', key: skill.name },
+                  h('span', { className: 'sg-tree-icon' }, h(Icon, { name: 'skill' })),
+                  h('div', { className: 'sg-gateway-item-main' },
+                    h('div', { className: 'sg-gateway-item-title sg-mono' }, skill.name),
+                    h('div', { className: 'sg-gateway-item-desc' }, skill.description || ''),
+                    h('div', { className: 'sg-gateway-item-meta' },
+                      h('span', { className: 'sg-badge sg-neutral' }, '元数据已返回'))),
+                  h('span', { className: 'sg-badge sg-neutral', title: '由 Agent 调用 skill_gateway load 取用全文' }, 'load 由 Agent 执行'))))
+            : h('div', { className: 'sg-notice sg-info' }, h(Icon, { name: 'info' }), '当前场景没有直接挂载的技能，继续进入子场景浏览。'),
+          h('div', { className: 'sg-notice sg-info', style: { marginTop: 10 } },
+            h(Icon, { name: 'info' }),
+            '按需求本管理页不提供“加载全文”功能；请让 Agent 调用 skill_gateway(action: "load") 完成渐进式加载。')),
+        h('details', { className: 'sg-card' },
+          h('summary', null, h(Icon, { name: 'chevron-right' }), '系统提示词（开关 ON 时注入）'),
+          h('pre', { className: 'sg-prompt-pre' }, [
+            '在任何设计、执行开始前，先通过 skill_gateway 逐层深入，探索合适的 skill 加载至上下文中。',
+            '1. browse() 返回根场景的直接子场景和直接技能。',
+            '2. browse(sceneId) 逐层进入，不要跳过场景或猜测 scene id。',
+            '3. load(skillName, scenePath?) 一次性加载选定技能的文件夹全文。',
+            '4. 有多个合适场景时可以分别进入并加载多个技能。'
+          ].join('\n'))));
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* 弹窗系统                                                             */
+    /* ------------------------------------------------------------------ */
+
+    function ModalShell({ title, children, footer, size }) {
+      return h('div', {
+        className: 'sg-modal-backdrop',
+        onMouseDown: (event) => {
+          if (event.target === event.currentTarget && footer && typeof footer.onClose === 'function') footer.onClose();
+        },
+      },
+        h('section', {
+          className: cx('sg-modal', size === 'large' && 'sg-large', size === 'confirm' && 'sg-confirm'),
+          role: 'dialog',
+          'aria-modal': true,
+          'aria-label': title,
+        },
+          h('header', { className: 'sg-modal-header' },
+            h('h2', { className: 'sg-modal-title' }, title),
+            h('button', { className: 'sg-icon-btn', type: 'button', onClick: footer ? footer.onClose : undefined, 'aria-label': '关闭弹窗' },
+              h(Icon, { name: 'close' }))),
+          h('div', { className: 'sg-modal-body' }, children),
+          footer
+            ? h('footer', { className: 'sg-modal-footer' }, footer.buttons)
+            : null));
+    }
+
+    function ModalFooter({ onClose, busy, submitLabel, submitKind, onSubmit, disabled }) {
+      const blocked = busy || disabled;
+      return {
+        onClose,
+        buttons: [
+          h('button', {
+            className: 'sg-btn sg-btn-ghost',
+            type: 'button',
+            disabled: busy,
+            onClick: onClose,
+          }, '取消'),
+          h('button', {
+            className: cx('sg-btn', submitKind === 'danger' ? 'sg-btn-danger-soft' : 'sg-btn-primary'),
+            type: 'button',
+            disabled: blocked,
+            onClick: onSubmit,
+          }, busy ? '处理中…' : submitLabel),
+        ],
+      };
+    }
+
+    function SceneFormModal({ modal, state, cwd, onClose, onSaved, notify }) {
+      const isEdit = Boolean(modal.payload && modal.payload.sceneId);
+      const sceneId = isEdit ? modal.payload.sceneId : null;
+      const scene = isEdit ? state.catalog.scenes[sceneId] : null;
+      const defaultParentId = modal.payload && modal.payload.parentId ? modal.payload.parentId : state.catalog.rootSceneId;
+      const [form, setForm] = useState({
+        name: scene ? scene.name : '',
+        description: scene ? scene.description : '',
+        tags: scene ? (scene.tags || []).join(', ') : '',
+        parentId: defaultParentId,
+      });
+      const [error, setError] = useState('');
+      const [busy, setBusy] = useState(false);
+      const options = flattenSceneOptions(state.catalog);
+
+      const submit = async () => {
+        if (busy) return;
+        setError('');
         setBusy(true);
         try {
-          const body = { action, cwd };
-          if (action === 'browse') body.sceneId = browseSceneId;
-          if (action === 'load') {
-            body.skillName = loadSkill;
-            body.scenePath = scenePath;
-            body.sessionId = sessionId || 'session';
+          const body = {
+            action: isEdit ? 'update' : 'create',
+            sceneId: isEdit ? sceneId : undefined,
+            parentId: isEdit ? undefined : form.parentId,
+            input: { name: form.name, description: form.description, tags: form.tags },
+            cwd,
+          };
+          const result = await api('POST', withCwd('/skill-gateway/scenes', cwd), body);
+          if (!result.ok) {
+            setError(result.error || '保存失败');
+            return;
           }
-          const data = await api('POST', withCwd('/skill-gateway/call', cwd), body);
-          setResult(data);
-          if (data.ok && action === 'load') {
-            notify(`已通过网关加载 ${loadSkill}`);
-            await onChanged();
+          notify(isEdit ? '场景已更新。' : '场景已创建。', 'success');
+          if (!isEdit && result.sceneId && modal.payload && typeof modal.payload.onCreated === 'function') {
+            modal.payload.onCreated(result.sceneId, form.parentId);
           }
-        } catch (error) {
-          setResult({ ok: false, action, error: error.message });
+          onClose();
+          await onSaved();
+        } catch (err) {
+          setError(err.message);
         } finally {
           setBusy(false);
         }
       };
 
-      const Raw = ({ value }) => h('details', { className: 'sg-raw' },
-        h('summary', null, '查看原始 JSON'),
-        h('div', { className: 'sg-json' }, JSON.stringify(value, null, 2)));
-      const SkillResult = ({ skill }) => h('div', { className: 'sg-skill-result', key: skill.name },
-        h('div', { className: 'sg-skill-main' },
-          h('strong', null, skill.name),
-          h('p', null, skill.description || '')));
-      const ChildResult = ({ child }) => h('div', { className: 'sg-skill-result', key: child.id },
-        h('div', { className: 'sg-skill-main' },
-          h('strong', null, child.name),
-          h('p', null, child.description || '')));
-
-      let body = null;
-      if (result && result.ok) {
-        const value = result.result || {};
-        if (action === 'browse') {
-          body = h('div', null,
-            h('div', { className: 'sg-match-head' },
-              h('span', { className: 'sg-path-pill' }, value.path || value.name),
-              h('span', { className: 'sg-match-note' }, (value.tags || []).join(', '))),
-            h('div', { className: 'sg-card' },
-              h('div', { className: 'sg-card-head' }, h('h3', null, value.name)),
-              h('p', { className: 'sg-help', style: { marginTop: 0 } }, value.description || '（无描述）'),
-              h('div', { className: 'sg-section-label' }, '子场景'),
-              (value.children || []).length
-                ? h('div', { className: 'sg-skill-result-list' }, value.children.map((child) => h(ChildResult, { child })))
-                : h('div', { className: 'sg-empty', style: { padding: 9 } }, '没有子场景。'),
-              h('div', { className: 'sg-section-label' }, '直接挂载的技能'),
-              (value.skills || []).length
-                ? h('div', { className: 'sg-skill-result-list' }, value.skills.map((skill) => h(SkillResult, { skill })))
-                : h('div', { className: 'sg-empty', style: { padding: 9 } }, '这个场景没有直接挂载技能。'),
-            h(Raw, { value })));
-        } else if (action === 'load') {
-          const files = value.files || {};
-          body = h('div', null,
-            h('div', { className: 'sg-match-head' },
-              h('span', { className: 'sg-path-pill' }, value.skillName || ''),
-              value.scenePath ? h('span', { className: 'sg-match-note' }, value.scenePath) : null),
-            h('div', { className: 'sg-file-list' },
-              Object.keys(files).sort().map((rel) =>
-                h('div', { className: 'sg-file-row', key: rel },
-                  h('span', null, rel),
-                  h('span', null, `${String(files[rel] || '').length} chars`)))),
-            files['SKILL.md']
-              ? h('div', { className: 'sg-preview' }, String(files['SKILL.md']).slice(0, 1200))
-              : null,
-            h(Raw, { value }));
-        }
-      } else if (result) {
-        body = h('div', { className: 'sg-error' }, result.error || '调用失败');
-      }
-
-      return h('div', { className: 'sg-grid2' },
-        h('section', { className: 'sg-card' },
-          h('div', { className: 'sg-card-head' }, h('h3', null, '网关工具调用')),
-          h('div', { className: 'sg-field' },
-            h('label', null, 'action'),
-            h('select', { className: 'sg-select', value: action, onChange: (event) => { setAction(event.target.value); setResult(null); } },
-              h('option', { value: 'browse' }, 'browse(sceneId?)'),
-              h('option', { value: 'load' }, 'load(skillName, scenePath?)'))),
-          action === 'browse'
-            ? h('div', { className: 'sg-field' },
-                h('label', null, 'sceneId'),
-                h('select', { className: 'sg-select', value: browseSceneId, onChange: (event) => setBrowseSceneId(event.target.value) },
-                  sceneIds.map((id) => h('option', { key: id, value: id }, catalog.scenes[id].name))))
-            : null,
-          action === 'load'
+      return h(ModalShell, {
+        title: isEdit ? '编辑场景' : '新建场景',
+        footer: ModalFooter({
+          onClose,
+          busy,
+          submitLabel: isEdit ? '保存修改' : '创建场景',
+          onSubmit: submit,
+        }),
+      },
+        h('div', { className: 'sg-field' },
+          isEdit
             ? h('div', null,
-                h('div', { className: 'sg-field' },
-                  h('label', null, 'skillName'),
-                  h('select', { className: 'sg-select', value: loadSkill, onChange: (event) => setLoadSkill(event.target.value) },
-                    skillNames.map((skillName) => h('option', { key: skillName, value: skillName }, skillName)))),
-                h('div', { className: 'sg-field' },
-                  h('label', null, 'scenePath（可选）'),
-                  h('select', { className: 'sg-select', value: scenePath, onChange: (event) => setScenePath(event.target.value) },
-                    h('option', { value: '' }, '（不记录场景路径）'),
-                    loadPaths.map((path) => h('option', { key: path, value: path }, path)))))
-            : null,
-          h('button', { className: 'sg-btn sg-btn-primary', onClick: run, disabled: busy || !state.config.enabled }, busy ? '调用中…' : '运行'),
-          !state.config.enabled
-            ? h('div', { className: 'sg-note' }, '网关已关闭：工具与提示词已卸载。这里仅作为 UI 演示被禁用。')
-            : null),
-        h('section', { className: 'sg-card' },
-          h('div', { className: 'sg-card-head' },
-            h('h3', null, '调用结果'),
-            h('span', { className: 'sg-card-sub' }, action)),
-          body || h('div', { className: 'sg-result-empty' }, '运行一次 browse / load，结果会显示在这里。')));
+                h('span', { className: 'sg-field-label' }, '父场景'),
+                h('div', { className: 'sg-notice sg-info' }, h(Icon, { name: 'folder' }), scenePathOf(state.catalog, scene.parentId)))
+            : h('div', null,
+                h('label', { className: 'sg-field-label' }, '父场景'),
+                h('select', {
+                  className: 'sg-field-select',
+                  value: form.parentId,
+                  onChange: (event) => setForm({ ...form, parentId: event.target.value }),
+                },
+                  options.map((option) => h('option', { key: option.id, value: option.id },
+                    `${'　'.repeat(option.depth)}${option.name}`))))),
+        h('div', { className: 'sg-field' },
+          h('label', { className: 'sg-field-label' },
+            h('span', { className: 'sg-required' }, '*'), '场景名称'),
+          h('input', {
+            className: cx('sg-field-input', error && 'sg-is-invalid'),
+            type: 'text',
+            maxLength: 40,
+            value: form.name,
+            placeholder: '如：后端开发',
+            onChange: (event) => setForm({ ...form, name: event.target.value }),
+          }),
+          h('div', { className: 'sg-field-hint' }, '全局唯一，不能为空。根场景不可删除。')),
+        h('div', { className: 'sg-field' },
+          h('label', { className: 'sg-field-label' }, '场景描述'),
+          h('textarea', {
+            className: 'sg-field-textarea',
+            rows: 3,
+            maxLength: 160,
+            value: form.description,
+            placeholder: '这个场景用于完成什么目的？',
+            onChange: (event) => setForm({ ...form, description: event.target.value }),
+          })),
+        h('div', { className: 'sg-field' },
+          h('label', { className: 'sg-field-label' }, '标签'),
+          h('input', {
+            className: 'sg-field-input',
+            type: 'text',
+            value: form.tags,
+            placeholder: '用逗号分隔，如 api, service',
+            onChange: (event) => setForm({ ...form, tags: event.target.value }),
+          }),
+          h('div', { className: 'sg-field-hint' }, '标签会参与 skill_gateway 匹配，可留空。')),
+        error ? h('div', { className: 'sg-form-error' }, error) : null);
+    }
+
+    function DeleteSceneModal({ modal, state, cwd, onClose, onSaved, notify }) {
+      const sceneId = modal.payload.sceneId;
+      const scene = state.catalog.scenes[sceneId];
+      const [busy, setBusy] = useState(false);
+      const [error, setError] = useState('');
+      if (!scene) return null;
+
+      const deletedIds = collectDescendants(state.catalog, sceneId);
+      const affectedSkills = new Set();
+      deletedIds.forEach((id) => {
+        (state.catalog.scenes[id].skills || []).forEach((skillName) => affectedSkills.add(skillName));
+      });
+
+      const submit = async () => {
+        setBusy(true);
+        setError('');
+        try {
+          const result = await api('POST', withCwd('/skill-gateway/scenes', cwd), { action: 'delete', sceneId, cwd });
+          if (!result.ok) {
+            setError(result.error || '删除失败');
+            return;
+          }
+          notify(`已删除 ${result.deletedIds ? result.deletedIds.length : deletedIds.length} 个场景，技能均已解链。`, 'success');
+          onClose();
+          await onSaved();
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      return h(ModalShell, {
+        title: '删除场景',
+        size: 'confirm',
+        footer: ModalFooter({
+          onClose,
+          busy,
+          submitLabel: '删除场景',
+          submitKind: 'danger',
+          onSubmit: submit,
+        }),
+      },
+        h('div', { className: 'sg-notice sg-warning' },
+          h(Icon, { name: 'warning' }),
+          h('span', null, '即将删除 ', h('b', null, `${deletedIds.length}`), ` 个场景（含 ${Math.max(deletedIds.length - 1, 0)} 个子场景）。子场景会级联删除。`)),
+        h('div', { className: 'sg-field', style: { margin: '16px 0 0' } },
+          h('span', { className: 'sg-field-label' }, '受影响技能'),
+          affectedSkills.size
+            ? h('div', null,
+                h('div', { className: 'sg-skill-scenes' },
+                  [...affectedSkills].map((skillName) => h('span', { className: 'sg-badge sg-neutral', key: skillName }, skillName))),
+                h('div', { className: 'sg-field-hint' }, '技能只会从这些场景解除挂载，技能文件与历史统计都会保留。'))
+            : h('div', { className: 'sg-field-hint' }, '这些场景没有直接或间接挂载技能。')),
+        error ? h('div', { className: 'sg-form-error' }, error) : null);
+    }
+
+    function SkillPickerModal({ modal, state, cwd, onClose, onSaved, notify }) {
+      const sceneId = modal.payload.sceneId;
+      const scene = state.catalog.scenes[sceneId];
+      const skills = Object.values(state.catalog.skills || {}).sort((a, b) => a.name.localeCompare(b.name, 'en'));
+      const [checked, setChecked] = useState(() => new Set(scene ? scene.skills || [] : []));
+      const [filter, setFilter] = useState('');
+      const [busy, setBusy] = useState(false);
+      const [error, setError] = useState('');
+      if (!scene) return null;
+
+      const visibleSkills = skills.filter((skill) =>
+        !filter || `${skill.name} ${skill.description}`.toLowerCase().includes(filter.toLowerCase()));
+
+      const submit = async () => {
+        if (busy) return;
+        setBusy(true);
+        setError('');
+        const before = new Set(scene.skills || []);
+        const after = new Set(checked);
+        let attached = 0;
+        let detached = 0;
+        try {
+          for (const skillName of after) {
+            if (before.has(skillName)) continue;
+            const result = await api('POST', withCwd('/skill-gateway/scenes/skills', cwd), {
+              action: 'attach', sceneId, skillName, cwd,
+            });
+            if (!result.ok) throw new Error(result.error || `挂载 ${skillName} 失败`);
+            if (result.added) attached += 1;
+          }
+          for (const skillName of before) {
+            if (after.has(skillName)) continue;
+            const result = await api('POST', withCwd('/skill-gateway/scenes/skills', cwd), {
+              action: 'detach', sceneId, skillName, cwd,
+            });
+            if (!result.ok) throw new Error(result.error || `解链 ${skillName} 失败`);
+            if (result.removed) detached += 1;
+          }
+          notify(attached || detached ? `挂载 ${attached} 个，解链 ${detached} 个。` : '挂载关系没有变化。', attached || detached ? 'success' : 'info');
+          onClose();
+          await onSaved();
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      return h(ModalShell, {
+        title: '管理场景挂载的技能',
+        size: 'large',
+        footer: ModalFooter({
+          onClose,
+          busy,
+          submitLabel: '保存挂载',
+          onSubmit: submit,
+        }),
+      },
+        h('label', { className: 'sg-search' },
+          h(Icon, { name: 'search' }),
+          h('input', {
+            type: 'search',
+            placeholder: '搜索技能名称或描述',
+            value: filter,
+            onChange: (event) => setFilter(event.target.value),
+          })),
+        h('div', { className: 'sg-field', style: { margin: '16px 0 0' } },
+          h('span', { className: 'sg-field-label' }, `${scene.name} 的直接技能`),
+          h('div', { className: 'sg-check-list' },
+            visibleSkills.map((skill) => {
+              const isChecked = checked.has(skill.name);
+              return h('label', { className: 'sg-check-row', key: skill.name },
+                h('input', {
+                  type: 'checkbox',
+                  checked: isChecked,
+                  onChange: () => {
+                    setChecked((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(skill.name)) next.delete(skill.name);
+                      else next.add(skill.name);
+                      return next;
+                    });
+                  },
+                }),
+                h('span', { className: 'sg-check-row-main' },
+                  h('span', { className: 'sg-check-row-title sg-mono' }, skill.name),
+                  h('span', { className: 'sg-check-row-desc' }, skill.description || '')),
+                h('span', { className: cx('sg-badge', isChecked ? 'sg-primary' : 'sg-neutral') },
+                  isChecked ? '已挂载' : '未挂载'));
+            })),
+          h('div', { className: 'sg-field-hint' }, '一个技能可以同时挂载到多个场景；取消勾选只会解除当前场景的挂载。')),
+        error ? h('div', { className: 'sg-form-error' }, error) : null);
+    }
+
+    function AttachSkillModal({ modal, state, cwd, onClose, onSaved, notify }) {
+      const skillName = modal.payload.skillName;
+      const skill = state.catalog.skills[skillName];
+      const firstPath = scenePathsForSkill(state.catalog, skillName)[0];
+      const firstScene = Object.values(state.catalog.scenes).find((scene) => scenePathOf(state.catalog, scene.id) === firstPath);
+      const [sceneId, setSceneId] = useState(firstScene ? firstScene.id : state.catalog.rootSceneId);
+      const [busy, setBusy] = useState(false);
+      const [error, setError] = useState('');
+      if (!skill) return null;
+      const options = flattenSceneOptions(state.catalog);
+
+      const submit = async () => {
+        setBusy(true);
+        setError('');
+        try {
+          const result = await api('POST', withCwd('/skill-gateway/scenes/skills', cwd), {
+            action: 'attach', sceneId, skillName, cwd,
+          });
+          if (!result.ok) throw new Error(result.error || '挂载失败');
+          const scene = state.catalog.scenes[sceneId];
+          notify(result.added ? `已挂载到「${scene.name}」。` : '该场景已挂载此技能。', result.added ? 'success' : 'info');
+          onClose();
+          await onSaved();
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      return h(ModalShell, {
+        title: '挂载技能到场景',
+        footer: ModalFooter({ onClose, busy, submitLabel: '确认挂载', onSubmit: submit }),
+      },
+        h('div', { className: 'sg-notice sg-info', style: { marginBottom: 16 } },
+          h(Icon, { name: 'skill' }),
+          h('span', null, h('b', { className: 'sg-mono' }, skillName), `：${skill.description || ''}`)),
+        h('div', { className: 'sg-field' },
+          h('label', { className: 'sg-field-label' }, '目标场景'),
+          h('select', {
+            className: 'sg-field-select',
+            value: sceneId,
+            onChange: (event) => setSceneId(event.target.value),
+          },
+            options.map((option) => h('option', { key: option.id, value: option.id },
+              `${'　'.repeat(option.depth)}${option.name}`)))),
+        h('div', { className: 'sg-field-hint' }, '同一技能可挂载到多个场景；重复挂载同一场景不会产生重复记录。'),
+        error ? h('div', { className: 'sg-form-error' }, error) : null);
+    }
+
+    function SkillDetailModal({ modal, state, cwd, onClose, notify, setModal }) {
+      const skillName = modal.payload.skillName;
+      const skill = state.catalog.skills[skillName];
+      const paths = skill ? scenePathsForSkill(state.catalog, skillName) : [];
+      const [files, setFiles] = useState(null);
+      const [loadError, setLoadError] = useState('');
+
+      useEffect(() => {
+        let alive = true;
+        setFiles(null);
+        setLoadError('');
+        api('GET', withParams(withCwd('/skill-gateway/skills/files', cwd), { skillName }))
+          .then((data) => {
+            if (!alive) return;
+            if (!data.ok) {
+              setLoadError(data.error || '读取技能文件失败');
+            } else {
+              setFiles(data.files || {});
+            }
+          })
+          .catch((err) => {
+            if (alive) setLoadError(err.message);
+          });
+        return () => {
+          alive = false;
+        };
+      }, [skillName, cwd]);
+
+      if (!skill) return null;
+      const fileNames = files ? Object.keys(files).sort() : [];
+
+      return h(ModalShell, {
+        title: `技能详情 · ${skillName}`,
+        size: 'large',
+        footer: {
+          onClose,
+          buttons: [
+            h('button', {
+              className: 'sg-btn sg-btn-danger-soft',
+              type: 'button',
+              onClick: () => setModal({ type: 'delete-skill', payload: { skillName } }),
+            }, '删除技能'),
+            h('button', { className: 'sg-btn sg-btn-ghost', type: 'button', onClick: onClose }, '关闭'),
+          ],
+        },
+      },
+        h('div', { className: 'sg-notice sg-info', style: { marginBottom: 16 } },
+          h(Icon, { name: 'info' }), skill.description || '（无描述）'),
+        h('div', { className: 'sg-stat-cards', style: { gridTemplateColumns: '1fr 1fr', marginBottom: 16 } },
+          h('div', { className: 'sg-stat-card', style: { padding: 12, border: '1px solid var(--sg-line-soft)', borderRadius: 'var(--sg-r-sm)' } },
+            h('div', { className: 'sg-stat-label' }, '创建时间'),
+            h('div', { className: 'sg-stat-value', style: { fontSize: 14 } }, fmtDateTime(skill.createdAt))),
+          h('div', { className: 'sg-stat-card', style: { padding: 12, border: '1px solid var(--sg-line-soft)', borderRadius: 'var(--sg-r-sm)' } },
+            h('div', { className: 'sg-stat-label' }, '最近更新'),
+            h('div', { className: 'sg-stat-value', style: { fontSize: 14 } }, fmtRelative(skill.updatedAt)))),
+        h('div', { className: 'sg-field' },
+          h('span', { className: 'sg-field-label' }, `挂载场景（${paths.length}）`),
+          paths.length
+            ? h('div', { className: 'sg-skill-scenes' },
+                paths.map((path) => h('span', { className: 'sg-path-chip', title: path, key: path }, path)))
+            : h('div', { className: 'sg-notice sg-warning' },
+                h(Icon, { name: 'warning' }), '尚未挂载到任何场景，Agent 无法经场景树发现该技能。')),
+        h('div', { className: 'sg-field' },
+          h('span', { className: 'sg-field-label' }, `技能文件夹（${fileNames.length} 个文件）`),
+          loadError
+            ? h('div', { className: 'sg-notice sg-danger' }, h(Icon, { name: 'error' }), loadError)
+            : !files
+              ? h('div', { className: 'sg-notice sg-info' }, h(Icon, { name: 'info' }), '正在读取文件列表…')
+              : h('div', { className: 'sg-check-list' },
+                  fileNames.map((file) => h('button', {
+                    className: 'sg-check-row',
+                    key: file,
+                    type: 'button',
+                    style: { border: '1px solid var(--sg-line)', background: 'var(--sg-bg)', width: '100%', textAlign: 'left' },
+                    onClick: () => setModal({ type: 'file-preview', payload: { skillName, files, active: file } }),
+                  },
+                    h(Icon, { name: 'file' }),
+                    h('span', { className: 'sg-check-row-main' },
+                      h('span', { className: 'sg-check-row-title sg-mono' }, file))))),
+          h('div', { className: 'sg-field-hint' }, '管理面板中的文件预览不会记录使用；只有 skill_gateway load 才记录 gateway 使用。')));
+    }
+
+    function FilePreviewModal({ modal, onClose }) {
+      const payload = modal.payload || {};
+      const files = payload.files || {};
+      const [active, setActive] = useState(payload.active || Object.keys(files).includes('SKILL.md') ? 'SKILL.md' : Object.keys(files)[0] || '');
+      const fileNames = Object.keys(files).sort();
+
+      return h(ModalShell, {
+        title: `文件预览 · ${payload.skillName || ''}`,
+        size: 'large',
+        footer: {
+          onClose,
+          buttons: [h('button', { className: 'sg-btn sg-btn-ghost', type: 'button', onClick: onClose }, '关闭')],
+        },
+      },
+        payload.notice
+          ? h('div', { className: 'sg-notice sg-success', style: { marginBottom: 12 } },
+              h(Icon, { name: 'check' }), payload.notice)
+          : null,
+        h('div', { className: 'sg-file-preview' },
+          h('aside', { className: 'sg-file-tree' },
+            fileNames.map((file) => h('button', {
+              key: file,
+              type: 'button',
+              className: file === active ? 'sg-is-active' : undefined,
+              onClick: () => setActive(file),
+            },
+              h(Icon, { name: 'file' }),
+              h('span', { className: 'sg-mono' }, file)))),
+          h('section', { className: 'sg-file-content' },
+            h('div', { className: 'sg-file-content-head sg-mono' }, active),
+            h('pre', null, files[active] || ''))));
+    }
+
+    function DeleteSkillModal({ modal, state, cwd, onClose, onSaved, notify }) {
+      const skillName = modal.payload.skillName;
+      const skill = state.catalog.skills[skillName];
+      const paths = skill ? scenePathsForSkill(state.catalog, skillName) : [];
+      const [busy, setBusy] = useState(false);
+      const [error, setError] = useState('');
+      if (!skill) return null;
+
+      const submit = async () => {
+        setBusy(true);
+        setError('');
+        try {
+          const result = await api('POST', withCwd('/skill-gateway/skills/delete', cwd), { skillName, cwd });
+          if (!result.ok) throw new Error(result.error || '删除失败');
+          notify(`技能「${skillName}」已删除，历史统计保留。`, 'success');
+          onClose();
+          await onSaved();
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      return h(ModalShell, {
+        title: '删除技能',
+        size: 'confirm',
+        footer: ModalFooter({
+          onClose,
+          busy,
+          submitLabel: '删除技能',
+          submitKind: 'danger',
+          onSubmit: submit,
+        }),
+      },
+        h('div', { className: 'sg-notice sg-danger' },
+          h(Icon, { name: 'error' }),
+          h('span', null, '删除后将永久移除技能文件夹「', h('b', { className: 'sg-mono' }, skillName), '」及其资源文件。')),
+        h('div', { className: 'sg-notice sg-success', style: { marginTop: 8 } },
+          h(Icon, { name: 'check' }), '历史使用统计会保留，来源与场景路径仍然可见。'),
+        h('div', { className: 'sg-field', style: { margin: '16px 0 0' } },
+          h('span', { className: 'sg-field-label' }, `将从以下场景解链（${paths.length}）`),
+          paths.length
+            ? h('div', { className: 'sg-skill-scenes' },
+                paths.map((path) => h('span', { className: 'sg-path-chip', key: path }, path)))
+            : h('div', { className: 'sg-field-hint' }, '该技能当前未挂载到任何场景。')),
+        error ? h('div', { className: 'sg-form-error' }, error) : null);
+    }
+
+    function skillMd(skillName, description, body) {
+      return `---\nname: ${skillName}\ndescription: ${description}\n---\n\n${body}`;
+    }
+
+    function sampleSuccessUploadItem() {
+      return {
+        name: 'scene-tree-ops-sample',
+        files: [
+          {
+            path: '运维与可靠性/incident-review/SKILL.md',
+            content: skillMd('incident-review', '线上事故复盘流程：时间线还原、根因分析与行动项跟踪。', '# Incident Review\n\n1. 还原时间线。\n2. 定位根因。\n3. 输出行动项并跟踪。'),
+          },
+          {
+            path: '运维与可靠性/incident-review/runbook.md',
+            content: '# Runbook\n\n- 先止损，再定位。\n- 恢复后保留现场。\n- 复盘行动项必须可验证。',
+          },
+          {
+            path: '运维与可靠性/可观测性/slo-checklist/SKILL.md',
+            content: skillMd('slo-checklist', 'SLO 与监控告警清单：指标口径、告警分级与排班响应。', '# SLO Checklist\n\n1. 明确指标口径。\n2. 告警分级。\n3. 空页与排班确认。'),
+          },
+          {
+            path: '后端开发/sql-review/SKILL.md',
+            content: skillMd('sql-review', 'SQL 与索引评审（示例更新版），新增深分页游标检查。', '# SQL Review\n\n更新：深分页优先使用游标，并对 OFFSET 超阈值告警。'),
+          },
+          {
+            path: '后端开发/sql-review/checklist.sql',
+            content: '-- 检查：过滤条件、JOIN、排序、分页\nSELECT 1;\n',
+          },
+        ],
+      };
+    }
+
+    function sampleFailureUploadItem() {
+      return {
+        name: 'scene-tree-invalid-sample',
+        files: [
+          { path: 'frontend-api/SKILL.md', content: '---\nname: frontend-api\n---\n\n缺少 description。' },
+          { path: '新场景/Bad_Name/SKILL.md', content: '---\nname: Bad_Name\ndescription: name 含大写和下划线，不符合约束。\n---\n' },
+          { path: '新场景/no-frontmatter/SKILL.md', content: '# 没有 frontmatter\n' },
+        ],
+      };
+    }
+
+    async function filesToUploadItem(fileList) {
+      const files = [];
+      let rootName = '';
+      for (const file of fileList) {
+        const raw = file.webkitRelativePath || file.name || '';
+        if (raw.endsWith('/')) continue;
+        const segments = raw.split('/').filter(Boolean);
+        if (!segments.length) continue;
+        if (!rootName && file.webkitRelativePath) rootName = segments[0];
+        const path = file.webkitRelativePath ? segments.slice(1).join('/') : segments.join('/');
+        if (!path) continue;
+        let content = '';
+        try {
+          content = await file.text();
+        } catch {
+          content = '';
+        }
+        files.push({ path, content });
+      }
+      return { name: rootName || 'selected-folder', files };
+    }
+
+    function UploadModal({ modal, state, cwd, onClose, onSaved, notify }) {
+      const inputRef = useRef(null);
+      const [pending, setPending] = useState(null);
+      const [busy, setBusy] = useState(false);
+      const [reading, setReading] = useState(false);
+
+      const chooseFolder = () => {
+        if (inputRef.current) inputRef.current.click();
+      };
+
+      const setPendingUpload = useCallback(async (item) => {
+        setPending({ item, preview: null });
+        try {
+          const preview = await api('POST', withCwd('/skill-gateway/scene-tree/preview', cwd), { item, cwd });
+          setPending({ item, preview });
+        } catch (err) {
+          setPending({ item, preview: { ok: false, reasons: [err.message], name: item.name } });
+        }
+      }, [cwd]);
+
+      const onChooseFiles = async (event) => {
+        const input = event.target;
+        const fileList = [...(input.files || [])];
+        input.value = '';
+        if (!fileList.length) {
+          setPending({ item: { name: '场景树文件夹', files: [] }, preview: { ok: false, reasons: ['文件夹为空。'] } });
+          return;
+        }
+        setReading(true);
+        try {
+          const roots = new Set();
+          for (const file of fileList) {
+            const raw = file.webkitRelativePath || file.name || '';
+            const first = raw.split('/').filter(Boolean)[0];
+            if (first) roots.add(first);
+          }
+          if (roots.size > 1) {
+            setPending({ item: { name: '场景树文件夹', files: [] }, preview: { ok: false, reasons: ['一次只能选择一个场景树文件夹。'] } });
+            return;
+          }
+          await setPendingUpload(await filesToUploadItem(fileList));
+        } catch (err) {
+          setPending({ item: { name: '场景树文件夹', files: [] }, preview: { ok: false, reasons: [err.message] } });
+        } finally {
+          setReading(false);
+        }
+      };
+
+      const submit = async () => {
+        if (!pending || !pending.preview || !pending.preview.ok || busy) return;
+        setBusy(true);
+        try {
+          const result = await api('POST', withCwd('/skill-gateway/scene-tree/upload', cwd), { item: pending.item, cwd });
+          if (!result.ok) {
+            notify(result.reasons ? result.reasons[0] : '导入失败。', 'danger');
+            return;
+          }
+          const counts = result.sceneCounts || {};
+          notify(`导入完成：新建场景 ${counts.created || 0} 个，复用 ${counts.reused || 0} 个；技能新建 ${result.skillsCreated || 0} 个，更新 ${result.skillsUpdated || 0} 个。`, 'success', 6000);
+          onClose();
+          await onSaved();
+        } catch (err) {
+          notify(err.message, 'danger');
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const preview = pending ? pending.preview : null;
+      const previewOk = preview && preview.ok;
+      const renderPreview = () => {
+        if (reading) {
+          return h('div', { className: 'sg-upload-preview' },
+            h('div', { className: 'sg-notice sg-info' }, h(Icon, { name: 'info' }), '正在读取文件夹，请稍候…'));
+        }
+        if (!pending) return null;
+        if (!preview) {
+          return h('div', { className: 'sg-upload-preview' },
+            h('div', { className: 'sg-notice sg-info' }, h(Icon, { name: 'info' }), '正在解析并校验场景树…'));
+        }
+        if (!preview.ok) {
+          return h('div', { className: 'sg-upload-preview' },
+            h('div', { className: 'sg-notice sg-danger' },
+              h(Icon, { name: 'error' }),
+              h('div', null,
+                h('b', null, '校验失败，本次上传不会导入任何内容。'),
+                h('ul', { className: 'sg-reason-list' },
+                  (preview.reasons || [preview.error]).filter(Boolean).map((reason) => h('li', { key: reason }, reason))))));
+        }
+        const existing = state.catalog.skills || {};
+        return h('div', { className: 'sg-upload-preview' },
+          h('div', { className: 'sg-notice sg-success' },
+            h(Icon, { name: 'check' }),
+            `已解析文件夹「${preview.name || pending.item.name || 'selected-folder'}」，校验通过。`),
+          h('div', { className: 'sg-upload-summary' },
+            h('div', { className: 'sg-upload-summary-item' },
+              h('div', { className: 'sg-upload-summary-label' }, '新建场景'),
+              h('div', { className: 'sg-upload-summary-value' }, (preview.sceneCounts && preview.sceneCounts.created) || 0)),
+            h('div', { className: 'sg-upload-summary-item' },
+              h('div', { className: 'sg-upload-summary-label' }, '技能'),
+              h('div', { className: 'sg-upload-summary-value' }, preview.skillsImported || 0)),
+            h('div', { className: 'sg-upload-summary-item' },
+              h('div', { className: 'sg-upload-summary-label' }, '文件'),
+              h('div', { className: 'sg-upload-summary-value' }, preview.fileCount || 0))),
+          h('div', { className: 'sg-upload-list' },
+            (preview.skills || []).map((skill) => h('div', { className: 'sg-upload-skill-row', key: skill.name },
+              h('div', { className: 'sg-upload-skill-head' },
+                h('span', { className: 'sg-tree-icon' }, h(Icon, { name: 'skill' })),
+                h('span', { className: 'sg-upload-skill-name sg-mono' }, skill.name),
+                existing[skill.name]
+                  ? h('span', { className: 'sg-badge sg-warning' }, '同名更新')
+                  : h('span', { className: 'sg-badge sg-success' }, '新技能'),
+                h('span', { style: { marginLeft: 'auto', fontSize: 12, color: 'var(--sg-ink-3)' } }, `${skill.fileCount} 文件`)),
+              h('div', { className: 'sg-upload-skill-desc' }, skill.description || '')))),
+          (preview.ignoredFiles || []).length
+            ? h('div', { className: 'sg-field-hint', style: { marginTop: 8 } },
+                `场景目录中的普通文件不会作为技能资源导入：${preview.ignoredFiles.slice(0, 4).join('、')}${preview.ignoredFiles.length > 4 ? ' 等' : ''}`)
+            : null);
+      };
+
+      return h(ModalShell, {
+        title: '上传场景树',
+        size: 'large',
+        footer: ModalFooter({
+          onClose,
+          busy: busy || reading,
+          submitLabel: '导入场景树',
+          onSubmit: submit,
+          disabled: !previewOk,
+        }),
+      },
+        h('input', {
+          ref: inputRef,
+          type: 'file',
+          webkitdirectory: '',
+          multiple: true,
+          style: { display: 'none' },
+          onChange: onChooseFiles,
+        }),
+        h('div', { className: 'sg-dropzone' },
+          h('span', { className: 'sg-dropzone-icon' }, h(Icon, { name: 'upload' })),
+          h('div', { className: 'sg-dropzone-title' }, '选择一个场景树文件夹'),
+          h('p', { className: 'sg-dropzone-desc' },
+            '所选文件夹作为场景树根目录与现有根场景合并。不含 SKILL.md 的文件夹识别为场景；含直接 SKILL.md 的文件夹整体识别为技能。ZIP 上传已移除。'),
+          h('div', { className: 'sg-dropzone-actions' },
+            h('button', { className: 'sg-btn sg-btn-secondary', type: 'button', onClick: chooseFolder },
+              h(Icon, { name: 'upload' }), '选择文件夹'),
+            h('button', { className: 'sg-btn sg-btn-ghost', type: 'button', onClick: () => setPendingUpload(sampleSuccessUploadItem()) },
+              h(Icon, { name: 'check' }), '载入成功示例'),
+            h('button', { className: 'sg-btn sg-btn-ghost', type: 'button', onClick: () => setPendingUpload(sampleFailureUploadItem()) },
+              h(Icon, { name: 'error' }), '载入校验失败示例'))),
+        renderPreview());
+    }
+
+    function RelocateModal({ state, cwd, onClose, onSaved, notify }) {
+      const [dataDir, setDataDir] = useState(state.location ? state.location.dataDir : '');
+      const [busy, setBusy] = useState(false);
+      const [error, setError] = useState('');
+
+      const submit = async () => {
+        setBusy(true);
+        setError('');
+        try {
+          const result = await api('POST', withCwd('/skill-gateway/relocate', cwd), { dataDir, cwd });
+          if (!result.ok) throw new Error(result.error || '迁移失败');
+          notify(`数据落点已迁移到 ${result.dataDir || dataDir}，统计不丢失。`, 'success');
+          onClose();
+          await onSaved();
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      return h(ModalShell, {
+        title: '迁移数据落点',
+        size: 'confirm',
+        footer: ModalFooter({ onClose, busy, submitLabel: '迁移', onSubmit: submit }),
+      },
+        h('div', { className: 'sg-notice sg-info', style: { marginBottom: 16 } },
+          h(Icon, { name: 'info' }),
+          h('span', null, '数据默认落在工作目录根 ', h('span', { className: 'sg-mono' }, '.skillgate/'),
+            '，也可由 ', h('span', { className: 'sg-mono' }, '.skillgate-anchor'), ' 指向自定义位置。')),
+        h('div', { className: 'sg-field' },
+          h('label', { className: 'sg-field-label' }, '数据目录'),
+          h('input', {
+            className: 'sg-field-input',
+            type: 'text',
+            value: dataDir,
+            placeholder: '如 .skillgate/ 或 .config/skillgate/',
+            onChange: (event) => setDataDir(event.target.value),
+          }),
+          h('div', { className: 'sg-field-hint' }, '迁移会先复制数据、再更新锚点、最后删除旧目录，统计不丢失。')),
+        error ? h('div', { className: 'sg-form-error' }, error) : null);
+    }
+
+    function ModalHost(props) {
+      const { modal, state, cwd, onClose, onSaved, notify, setModal } = props;
+      const shared = { modal, state, cwd, onClose, onSaved, notify };
+      switch (modal.type) {
+        case 'scene-create':
+        case 'scene-edit':
+          return h(SceneFormModal, shared);
+        case 'delete-scene':
+          return h(DeleteSceneModal, shared);
+        case 'skill-picker':
+          return h(SkillPickerModal, shared);
+        case 'attach-skill':
+          return h(AttachSkillModal, shared);
+        case 'skill-detail':
+          return h(SkillDetailModal, { ...shared, setModal });
+        case 'file-preview':
+          return h(FilePreviewModal, shared);
+        case 'delete-skill':
+          return h(DeleteSkillModal, shared);
+        case 'upload':
+          return h(UploadModal, shared);
+        case 'relocate':
+          return h(RelocateModal, shared);
+        default:
+          return null;
+      }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* 根组件：面板、launcher、toast、宽度拖拽                               */
+    /* ------------------------------------------------------------------ */
+
+    function ToastItem({ toast, onDismiss }) {
+      useEffect(() => {
+        const timer = window.setTimeout(() => onDismiss(toast.id), toast.duration || 3000);
+        return () => window.clearTimeout(timer);
+      }, [toast.id, toast.duration, onDismiss]);
+
+      return h('div', { className: cx('sg-toast', toast.kind === 'success' ? 'sg-success' : toast.kind === 'danger' ? 'sg-danger' : toast.kind === 'warning' ? 'sg-warning' : 'sg-info') },
+        h(Icon, { name: toast.kind === 'success' ? 'check' : toast.kind === 'danger' ? 'error' : toast.kind === 'warning' ? 'warning' : 'info' }),
+        h('span', null, toast.message));
     }
 
     function SkillGatewayOverlay(props = {}) {
@@ -763,14 +3547,43 @@ window.__ModuleLoader__.load({
       const sessionId = (sessionsSnapshot && sessionsSnapshot.current) || '';
 
       const [open, setOpen] = useState(false);
+      const [everOpen, setEverOpen] = useState(false);
       const [tab, setTab] = useState('catalog');
       const [state, setState] = useState(null);
       const [error, setError] = useState('');
-      const [lastEvent, setLastEvent] = useState('等待操作');
-      const [busy, setBusy] = useState(false);
+      const [busyToggle, setBusyToggle] = useState(false);
+      const [modal, setModal] = useState(null);
+      const [toasts, setToasts] = useState([]);
+      const [resizing, setResizing] = useState(false);
+      const toastSeq = useRef(0);
 
-      const notify = useCallback((message) => {
-        setLastEvent(`${new Date().toLocaleTimeString()}  ${message}`);
+      const [panelWidth, setPanelWidth] = useState(() => {
+        if (typeof window === 'undefined') return 440;
+        let saved = 0;
+        try {
+          saved = Number(window.localStorage && window.localStorage.getItem('skill-gateway.dsh.panelWidth'));
+        } catch {
+          saved = 0;
+        }
+        const maximum = Math.max(360, Math.min(760, window.innerWidth - 80));
+        return Number.isFinite(saved) && saved > 0 ? clamp(saved, 360, maximum) : 440;
+      });
+
+      useEffect(() => {
+        try {
+          if (window.localStorage) window.localStorage.setItem('skill-gateway.dsh.panelWidth', String(panelWidth));
+        } catch {
+          // localStorage 不可用时忽略。
+        }
+      }, [panelWidth]);
+
+      const notify = useCallback((message, kind = 'info', duration) => {
+        const id = ++toastSeq.current;
+        setToasts((prev) => [...prev, { id, message, kind, duration: duration || (kind === 'danger' || kind === 'warning' ? 5000 : 3000) }]);
+      }, []);
+
+      const dismissToast = useCallback((id) => {
+        setToasts((prev) => prev.filter((toast) => toast.id !== id));
       }, []);
 
       const refresh = useCallback(async () => {
@@ -781,81 +3594,170 @@ window.__ModuleLoader__.load({
       }, [cwd]);
 
       useEffect(() => {
+        if (open) setEverOpen(true);
         if (!open) return;
         refresh().catch((err) => setError(err.message));
       }, [open, refresh]);
 
       const toggleGateway = async () => {
-        if (!state || busy) return;
-        setBusy(true);
+        if (!state || busyToggle) return;
+        setBusyToggle(true);
         try {
           const next = !state.config.enabled;
           await api('POST', withCwd('/skill-gateway/toggle', cwd), { enabled: next, cwd });
-          notify(next ? '网关已开启' : '网关已关闭，默认技能旁路与统计观察器保持运行');
+          notify(next ? '网关已开启：skill_gateway 工具与提示词恢复。' : '网关已关闭：工具与提示词卸下，统计观察器仍生效。', next ? 'success' : 'warning');
           await refresh();
         } catch (err) {
           setError(err.message);
+          notify(err.message, 'danger');
         } finally {
-          setBusy(false);
+          setBusyToggle(false);
         }
       };
 
-      if (!open) {
-        return h('div', { className: 'sg-root' },
-          h('button', { className: 'sg-fab', onClick: () => setOpen(true), 'aria-label': '打开 Skill Gateway' },
-            h('span', { className: 'sg-fab-glyph' }, '▮'),
-            'Skill Gateway'));
-      }
+      const closeModal = useCallback(() => setModal(null), []);
 
-      const routeState = state ? (state.config.enabled ? 'on' : 'off') : 'loading';
-      return h('div', { className: 'sg-root' },
-        h('aside', { className: 'sg-panel', 'aria-label': 'Skill Gateway' },
-        h('header', { className: 'sg-head' },
-          h('div', null,
-            h('div', { className: 'sg-kicker' }, 'CLIENT ADAPTER'),
-            h('h2', { className: 'sg-title' }, 'Skill Gateway')),
-          h('div', { className: 'sg-head-gap' }),
-          h('button', {
-            className: 'sg-switch',
-            role: 'switch',
-            'aria-checked': state ? state.config.enabled : false,
-            onClick: toggleGateway,
-            disabled: busy || !state,
-          },
-            h('span', { className: 'sg-track' }, h('span', { className: 'sg-knob' })),
-            h('span', null, state ? (state.config.enabled ? '已开启' : '已关闭') : '…')),
-          h('button', { className: 'sg-icon-btn', onClick: () => setOpen(false), 'aria-label': '关闭面板' }, '×')),
-        h('div', { className: 'sg-route' },
-          h('div', { className: 'sg-lane' + (routeState === 'on' ? ' sg-live' : '') + (routeState === 'off' ? ' sg-off' : '') },
-            h('div', { className: 'sg-lane-label' }, 'GATEWAY ROUTE'),
-            h('div', { className: 'sg-track' },
-              h('span', { className: 'sg-node' }, 'agent'),
-              h('span', { className: 'sg-wire' }),
-              h('span', { className: 'sg-gate' }, h('i')),
-              h('span', { className: 'sg-wire' }),
-              h('span', { className: 'sg-node' }, 'catalog'))),
-          h('div', { className: 'sg-lane sg-live' },
-            h('div', { className: 'sg-lane-label' }, 'DEFAULT SKILL'),
-            h('div', { className: 'sg-track' },
-              h('span', { className: 'sg-node' }, 'harness skill tool'),
-              h('span', { className: 'sg-wire' }),
-              h('span', { className: 'sg-node' }, 'bypass · 恒可用'))),
-          h('div', { className: 'sg-observer' },
-            h('span', { className: 'sg-led' }),
-            'USAGE OBSERVER',
-            h('span', { className: 'sg-live-label' }, '恒开'))),
-        h('nav', { className: 'sg-tabs' },
-          [['catalog', '场景树管理'], ['stats', '统计'], ['gateway', '网关']].map(([value, label]) =>
-            h('button', { key: value, className: 'sg-tab' + (tab === value ? ' sg-active' : ''), onClick: () => setTab(value) }, label))),
-        h('div', { className: 'sg-body' },
-          error ? h('div', { className: 'sg-error' }, error) : null,
-          !state ? h('div', { className: 'sg-result-empty' }, '加载中…') : null,
-          state && tab === 'catalog' ? h(CatalogTab, { state, cwd, refresh, notify }) : null,
-          state && tab === 'stats' ? h(StatsTab, { cwd, sessionId }) : null,
-          state && tab === 'gateway' ? h(GatewayTab, { state, cwd, sessionId, onChanged: refresh, notify }) : null),
-          h('footer', { className: 'sg-foot' },
-            h('span', { className: 'sg-last' }, lastEvent),
-            h('span', null, state && state.location ? state.location.dataDir : '—'))));
+      const onSaved = useCallback(async () => {
+        await refresh();
+      }, [refresh]);
+
+      const maximumPanelWidth = () => Math.max(360, Math.min(760, window.innerWidth - 80));
+
+      useEffect(() => {
+        const handleViewportResize = () => {
+          setPanelWidth((value) => clamp(value, 360, maximumPanelWidth()));
+        };
+        window.addEventListener('resize', handleViewportResize);
+        return () => window.removeEventListener('resize', handleViewportResize);
+      }, []);
+
+      const beginResize = (event) => {
+        event.preventDefault();
+        const startX = event.clientX;
+        const startWidth = panelWidth;
+        setResizing(true);
+        const handleMove = (moveEvent) => {
+          const maximum = maximumPanelWidth();
+          setPanelWidth(clamp(startWidth + startX - moveEvent.clientX, 360, maximum));
+        };
+        const handleUp = () => {
+          window.removeEventListener('pointermove', handleMove);
+          window.removeEventListener('pointerup', handleUp);
+          window.removeEventListener('pointercancel', handleUp);
+          setResizing(false);
+        };
+        window.addEventListener('pointermove', handleMove);
+        window.addEventListener('pointerup', handleUp);
+        window.addEventListener('pointercancel', handleUp);
+      };
+
+      const tabDefs = [
+        ['catalog', '场景树管理', 'layers'],
+        ['stats', '统计', 'stats'],
+        ['gateway', '网关取用', 'gateway'],
+      ];
+
+      return h('div', { className: cx('sg-root', resizing && 'sg-is-resizing') },
+        !open
+          ? h('button', {
+              className: 'sg-launcher',
+              type: 'button',
+              onClick: () => {
+                setEverOpen(true);
+                setOpen(true);
+              },
+              'aria-label': '打开 Skill Gateway',
+            },
+              h(GatewayLogo, { size: 22 }),
+              'Skill Gateway')
+          : null,
+        everOpen
+          ? h('aside', {
+              className: cx('sg-panel', !open && 'sg-panel-closed'),
+              'aria-label': 'Skill Gateway 侧边栏',
+              style: { width: panelWidth },
+            },
+          h('div', {
+            className: 'sg-resizer',
+            role: 'separator',
+            'aria-orientation': 'vertical',
+            'aria-label': '拖拽调整 Skill Gateway 侧边栏宽度',
+            'aria-valuenow': panelWidth,
+            'aria-valuemin': 360,
+            'aria-valuemax': 760,
+            title: '拖拽调整宽度，双击恢复默认',
+            onPointerDown: beginResize,
+            onDoubleClick: () => setPanelWidth(clamp(440, 360, maximumPanelWidth())),
+          }),
+          h('header', { className: 'sg-panel-header' },
+            h(PanelMark),
+            h('div', { className: 'sg-panel-title-wrap' },
+              h('div', { className: 'sg-panel-title' }, 'Skill Gateway'),
+              h('div', { className: 'sg-panel-subtitle' }, '场景化管理 · 渐进式取用')),
+            h('label', { className: 'sg-switch', title: '网关开关：关闭后卸下工具与提示词，统计观察器仍生效' },
+              h('input', {
+                type: 'checkbox',
+                checked: state ? state.config.enabled : false,
+                disabled: busyToggle || !state,
+                onChange: toggleGateway,
+              }),
+              h('span', { className: 'sg-switch-track' }),
+              h('span', { className: 'sg-switch-label' }, '网关')),
+            h('button', {
+              className: 'sg-icon-btn',
+              type: 'button',
+              onClick: () => setOpen(false),
+              'aria-label': '关闭面板',
+            }, h(Icon, { name: 'close' }))),
+          h('nav', { className: 'sg-panel-tabs', 'aria-label': '面板导航' },
+            h('div', { className: 'sg-segmented' },
+              tabDefs.map(([value, label, iconName]) => h('button', {
+                key: value,
+                type: 'button',
+                className: tab === value ? 'sg-is-active' : undefined,
+                onClick: () => setTab(value),
+              },
+                h(Icon, { name: iconName }), label)))),
+          h('div', { className: 'sg-panel-body' },
+            error ? h('div', { className: 'sg-notice sg-danger', style: { marginBottom: 12 } },
+              h(Icon, { name: 'error' }), error) : null,
+            !state ? h('div', { className: 'sg-card' },
+              h('div', { className: 'sg-empty' },
+                h('div', { className: 'sg-empty-icon' }, h(Icon, { name: 'refresh' })),
+                h('h3', { className: 'sg-empty-title' }, '加载中…'))) : null,
+            state
+              ? h('div', { style: { display: tab === 'catalog' ? 'block' : 'none' } },
+                  h(CatalogTab, { state, cwd, onChanged: refresh, notify, setModal }))
+              : null,
+            state
+              ? h('div', { style: { display: tab === 'stats' ? 'block' : 'none' } },
+                  h(StatsTab, { cwd, sessionId, setTab, active: tab === 'stats' }))
+              : null,
+            state
+              ? h('div', { style: { display: tab === 'gateway' ? 'block' : 'none' } },
+                  h(GatewayTab, { state, notify }))
+              : null))
+          : null,
+        modal
+          ? h('div', { className: 'sg-modal-root' },
+              h(ModalHost, {
+                modal,
+                state,
+                cwd,
+                onClose: closeModal,
+                onSaved,
+                notify,
+                setModal,
+              }))
+          : null,
+        toasts.length
+          ? h('div', { className: 'sg-toast-root', 'aria-live': 'polite' },
+              toasts.map((toast) => h(ToastItem, {
+                key: toast.id,
+                toast,
+                onDismiss: dismissToast,
+              })))
+          : null);
     }
 
     function apply(ctx) {

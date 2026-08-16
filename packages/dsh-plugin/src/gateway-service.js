@@ -189,6 +189,48 @@ export class SkillGatewayService {
     return { ok: true, catalog: result.catalog, removed: result.removed };
   }
 
+  // 管理面板的文件预览，不记录任何使用；gateway load 仍由 `load` 统一记账。
+  async previewSkillFiles(cwd, skillName) {
+    const store = this.storeFor(cwd);
+    const catalog = await store.ensureCatalog();
+    const skill = catalog.skills[skillName];
+    if (!skill) return { ok: false, error: `技能不存在：${skillName}` };
+    const files = await store.loadSkillFiles(skillName);
+    return { ok: true, skillName, skill, files: files || {} };
+  }
+
+  async previewSceneTree(cwd, item, options = {}) {
+    const source = Array.isArray(item) ? { files: item } : item || {};
+    if (!Array.isArray(source.files) || !source.files.length) {
+      return { ok: false, reasons: ['uploadSceneTree 需要非空的 item.files。'], name: source.name || null };
+    }
+
+    const catalog = await this.ensureCatalog(cwd);
+    const result = coreImportSceneTree(catalog, source, {
+      now: options.now === undefined ? this.now() : options.now,
+      rootName: options.rootName,
+      rootPath: options.rootPath,
+      random: options.random,
+    });
+    if (!result.ok) return result;
+
+    return {
+      ok: true,
+      name: result.name,
+      sceneCounts: result.sceneCounts,
+      skillsImported: result.skillsImported,
+      skillsCreated: result.skillsCreated,
+      skillsUpdated: result.skillsUpdated,
+      fileCount: result.fileCount,
+      ignoredFiles: result.ignoredFiles,
+      skills: (result.skills || []).map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+        fileCount: Object.keys(skill.files || {}).length,
+      })),
+    };
+  }
+
   async uploadSkill(cwd, item, options = {}) {
     const validation = validateUpload(item);
     if (!validation.ok) return validation;

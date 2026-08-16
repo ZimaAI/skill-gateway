@@ -80,6 +80,53 @@ test('service uploadSceneTree persists scenes/skills and overwrites same-name sk
   assert.match(overwritten['SKILL.md'], /第二版/);
 });
 
+test('service previewSkillFiles reads files without recording usage', async (t) => {
+  const { service } = await tempService(t);
+  await service.uploadSkill(undefined, {
+    files: [{ path: 'SKILL.md', content: '---\nname: tdd\ndescription: test first\n---\n# TDD' }],
+  });
+
+  const before = await service.stats();
+  const preview = await service.previewSkillFiles(undefined, 'tdd');
+  const after = await service.stats();
+
+  assert.equal(preview.ok, true);
+  assert.equal(preview.skill.name, 'tdd');
+  assert.deepEqual(Object.keys(preview.files), ['SKILL.md']);
+  assert.equal(after.stats.total, before.stats.total);
+});
+
+test('service previewSceneTree validates and summarizes without persisting', async (t) => {
+  const { service } = await tempService(t);
+  const item = {
+    name: 'scene-tree',
+    files: [
+      { path: 'scene-tree/后端开发/数据库设计/SKILL.md', content: '---\nname: db-schema-design\ndescription: 第一版\n---\n# v1' },
+      { path: 'scene-tree/后端开发/数据库设计/templates/init.sql', content: 'select 1;' },
+    ],
+  };
+
+  const preview = await service.previewSceneTree(undefined, item);
+  assert.equal(preview.ok, true);
+  assert.equal(preview.sceneCounts.created, 1);
+  assert.equal(preview.skillsImported, 1);
+  assert.equal(preview.skills[0].fileCount, 2);
+
+  const state = await service.state();
+  assert.deepEqual(state.catalog.scenes, {
+    root: {
+      id: 'root',
+      name: '工作台',
+      description: '所有场景的单一根节点，场景树从这里展开。',
+      tags: ['workspace'],
+      parentId: null,
+      children: [],
+      skills: [],
+    },
+  });
+  assert.deepEqual(Object.keys(state.catalog.skills), []);
+});
+
 test('service stats keeps the timeline session-scoped and globals workspace-scoped', async (t) => {
   const { service } = await tempService(t);
   const files = [{ path: 'SKILL.md', content: '---\nname: tdd\ndescription: test first\n---\n' }];
