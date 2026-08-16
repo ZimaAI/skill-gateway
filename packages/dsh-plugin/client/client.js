@@ -403,9 +403,9 @@ svg.sg-icon {
 
 .sg-section-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   margin-bottom: 12px;
 }
 
@@ -2351,11 +2351,27 @@ details.sg-card[open] > summary {
 
     const ORGANIZE_MODE_LABELS = { classify: '技能分类', full: '一键整理', detect: '冲突检测' };
 
-    function OrganizeSection({ state, cwd, onChanged, notify, setModal }) {
+    function OrganizeTab({ state, cwd, onChanged, notify, setModal, onOpenSession }) {
       const { organize } = state;
       const running = organize && organize.running;
       const report = state.organizeReport;
       const snapshots = state.snapshots || {};
+
+      const trigger = async (mode) => {
+        if (running) return;
+        try {
+          const result = await api('POST', withCwd('/skill-gateway/organize/trigger', cwd), { mode, cwd });
+          if (!result.ok) {
+            notify(result.error || '触发失败。', 'danger', 6000);
+            return;
+          }
+          notify(mode === 'detect' ? '冲突检测会话已开启。' : '一键整理会话已开启。', 'success', 6000);
+          if (result.sessionId && onOpenSession) onOpenSession(result.sessionId);
+          await onChanged();
+        } catch (err) {
+          notify(err.message, 'danger');
+        }
+      };
 
       const openRollback = (slot) => {
         setModal({ type: 'rollback-confirm', payload: { slot } });
@@ -2379,65 +2395,86 @@ details.sg-card[open] > summary {
         return items;
       };
 
-      return h('div', { className: 'sg-card sg-report-card' },
-        h('div', { className: 'sg-report-head' },
-          h('span', { className: 'sg-report-title' }, '整理报告与回滚'),
-          running
-            ? h('span', { className: 'sg-badge sg-primary' }, `整理会话进行中：${ORGANIZE_MODE_LABELS[organize.mode] || organize.mode || ''}`)
-            : null),
-        !report
-          ? h('div', { className: 'sg-empty', style: { padding: '12px 0 4px' } },
-              h('h3', { className: 'sg-empty-title', style: { fontSize: 13 } }, '还没有整理报告'),
-              h('p', { className: 'sg-empty-desc' },
-                running ? '整理会话完成后会在这里展示改动摘要与冲突清单。' : '上传后会自动开启技能分类会话；也可手动触发「一键整理」或「冲突检测」。'))
-          : h('div', null,
-              h('div', { className: 'sg-report-section' },
-                h('div', { className: 'sg-report-section-title' },
-                  `最近报告 · ${ORGANIZE_MODE_LABELS[report.mode] || report.mode || '整理'}${report.startedAt ? ` · ${fmtDateTime(report.startedAt)}` : ''}${report.sessionId ? ` · ${report.sessionId}` : ''}`),
-                (() => {
-                  const items = renderChanges(report.changes);
-                  if (!items || !items.length) {
+      return h('div', { className: 'sg-panel-section' },
+        h('div', { className: 'sg-section-head' },
+          h('div', { className: 'sg-section-title-row' },
+            h('div', null,
+              h('h2', { className: 'sg-section-title' }, '整理'),
+              h('p', { className: 'sg-section-sub' }, '一键整理整棵场景树、只读冲突检测；最近一次整理报告与回滚入口。'))),
+          h('div', { className: 'sg-section-actions' },
+            h('button', {
+              className: 'sg-btn sg-btn-sm sg-btn-secondary',
+              type: 'button',
+              disabled: running,
+              title: running ? '整理会话进行中，请等待完成' : '让 Agent 对整棵场景树做一次完整整理（可回滚）',
+              onClick: () => trigger('full'),
+            }, h(Icon, { name: 'layers' }), '一键整理'),
+            h('button', {
+              className: 'sg-btn sg-btn-sm sg-btn-ghost',
+              type: 'button',
+              disabled: running,
+              title: running ? '整理会话进行中，请等待完成' : '只读检测冲突与重复技能，不改动场景树',
+              onClick: () => trigger('detect'),
+            }, h(Icon, { name: 'search' }), '冲突检测'))),
+        h('div', { className: 'sg-card sg-report-card' },
+          h('div', { className: 'sg-report-head' },
+            h('span', { className: 'sg-report-title' }, '整理报告与回滚'),
+            running
+              ? h('span', { className: 'sg-badge sg-primary' }, `整理会话进行中：${ORGANIZE_MODE_LABELS[organize.mode] || organize.mode || ''}`)
+              : null),
+          !report
+            ? h('div', { className: 'sg-empty', style: { padding: '12px 0 4px' } },
+                h('h3', { className: 'sg-empty-title', style: { fontSize: 13 } }, '还没有整理报告'),
+                h('p', { className: 'sg-empty-desc' },
+                  running ? '整理会话完成后会在这里展示改动摘要与冲突清单。' : '上传后会自动开启技能分类会话；也可手动触发「一键整理」或「冲突检测」。'))
+            : h('div', null,
+                h('div', { className: 'sg-report-section' },
+                  h('div', { className: 'sg-report-section-title' },
+                    `最近报告 · ${ORGANIZE_MODE_LABELS[report.mode] || report.mode || '整理'}${report.startedAt ? ` · ${fmtDateTime(report.startedAt)}` : ''}${report.sessionId ? ` · ${report.sessionId}` : ''}`),
+                  (() => {
+                    const items = renderChanges(report.changes);
+                    if (!items || !items.length) {
+                      return h('ul', { className: 'sg-report-list' },
+                        h('li', { key: 'none' }, report.mode === 'detect' ? '检测为只读，未改动场景树。' : '本次整理没有产生改动。'));
+                    }
                     return h('ul', { className: 'sg-report-list' },
-                      h('li', { key: 'none' }, report.mode === 'detect' ? '检测为只读，未改动场景树。' : '本次整理没有产生改动。'));
-                  }
-                  return h('ul', { className: 'sg-report-list' },
-                    items.map((item, index) => h('li', { key: index }, item)));
-                })()),
-              (report.conflicts && report.conflicts.length)
-                ? h('div', { className: 'sg-report-section' },
-                    h('div', { className: 'sg-report-section-title' }, '冲突'),
-                    h('ul', { className: 'sg-report-list' },
-                      report.conflicts.map((item, index) => h('li', { key: index }, item))))
-                : null,
-              (report.duplicates && report.duplicates.length)
-                ? h('div', { className: 'sg-report-section' },
-                    h('div', { className: 'sg-report-section-title' }, '重复技能'),
-                    h('ul', { className: 'sg-report-list' },
-                      report.duplicates.map((item, index) => h('li', { key: index }, item))))
-                : null,
-              (report.overwrites && report.overwrites.length)
-                ? h('div', { className: 'sg-report-section' },
-                    h('div', { className: 'sg-report-section-title' }, '同名覆盖'),
-                    h('div', { className: 'sg-report-chips' },
-                      report.overwrites.map((name) => h('span', { className: 'sg-path-chip', key: name }, name))))
-                : null),
-        h('div', { className: 'sg-report-foot' },
-          h('button', {
-            className: 'sg-btn sg-btn-sm sg-btn-ghost',
-            type: 'button',
-            disabled: !snapshots.upload,
-            title: snapshots.upload ? '回滚最近一次上传：还原整棵树、删除本批新增技能文件、恢复被覆盖的原文件' : '还没有可回滚的上传快照',
-            onClick: () => openRollback('upload'),
-          }, '回滚上传'),
-          h('button', {
-            className: 'sg-btn sg-btn-sm sg-btn-ghost',
-            type: 'button',
-            disabled: !snapshots.organize,
-            title: snapshots.organize ? '回滚最近一次整理：仅还原场景树，不触碰技能文件' : '还没有可回滚的整理快照',
-            onClick: () => openRollback('organize'),
-          }, '回滚整理'),
-          h('span', { style: { fontSize: 12, color: 'var(--sg-ink-3)', alignSelf: 'center' } },
-            '每个槽位只保留最近一份快照；回滚将把整棵树还原到该操作之前。')));
+                      items.map((item, index) => h('li', { key: index }, item)));
+                  })()),
+                (report.conflicts && report.conflicts.length)
+                  ? h('div', { className: 'sg-report-section' },
+                      h('div', { className: 'sg-report-section-title' }, '冲突'),
+                      h('ul', { className: 'sg-report-list' },
+                        report.conflicts.map((item, index) => h('li', { key: index }, item))))
+                  : null,
+                (report.duplicates && report.duplicates.length)
+                  ? h('div', { className: 'sg-report-section' },
+                      h('div', { className: 'sg-report-section-title' }, '重复技能'),
+                      h('ul', { className: 'sg-report-list' },
+                        report.duplicates.map((item, index) => h('li', { key: index }, item))))
+                  : null,
+                (report.overwrites && report.overwrites.length)
+                  ? h('div', { className: 'sg-report-section' },
+                      h('div', { className: 'sg-report-section-title' }, '同名覆盖'),
+                      h('div', { className: 'sg-report-chips' },
+                        report.overwrites.map((name) => h('span', { className: 'sg-path-chip', key: name }, name))))
+                  : null),
+          h('div', { className: 'sg-report-foot' },
+            h('button', {
+              className: 'sg-btn sg-btn-sm sg-btn-ghost',
+              type: 'button',
+              disabled: !snapshots.upload,
+              title: snapshots.upload ? '回滚最近一次上传：还原整棵树、删除本批新增技能文件、恢复被覆盖的原文件' : '还没有可回滚的上传快照',
+              onClick: () => openRollback('upload'),
+            }, '回滚上传'),
+            h('button', {
+              className: 'sg-btn sg-btn-sm sg-btn-ghost',
+              type: 'button',
+              disabled: !snapshots.organize,
+              title: snapshots.organize ? '回滚最近一次整理：仅还原场景树，不触碰技能文件' : '还没有可回滚的整理快照',
+              onClick: () => openRollback('organize'),
+            }, '回滚整理'),
+            h('span', { style: { fontSize: 12, color: 'var(--sg-ink-3)', alignSelf: 'center' } },
+              '每个槽位只保留最近一份快照；回滚将把整棵树还原到该操作之前。'))));
     }
 
     function LocationCard({ location, onRelocate }) {
@@ -2465,7 +2502,6 @@ details.sg-card[open] > summary {
       const [busyAction, setBusyAction] = useState(null);
 
       const selectedScene = catalog.scenes[selectedId] || catalog.scenes[catalog.rootSceneId];
-      const organizeRunning = state.organize && state.organize.running;
 
       useEffect(() => {
         if (!catalog.scenes[selectedId]) setSelectedId(catalog.rootSceneId);
@@ -2474,26 +2510,6 @@ details.sg-card[open] > summary {
       const refreshAfter = useCallback(async () => {
         await onChanged();
       }, [onChanged]);
-
-      const openOrganizeSession = (sessionId) => {
-        if (onOpenSession && sessionId) onOpenSession(sessionId);
-      };
-
-      const triggerOrganize = async (mode) => {
-        if (organizeRunning) return;
-        try {
-          const result = await api('POST', withCwd('/skill-gateway/organize/trigger', cwd), { mode, cwd });
-          if (!result.ok) {
-            notify(result.error || '触发失败。', 'danger', 6000);
-            return;
-          }
-          notify(mode === 'detect' ? '冲突检测会话已开启。' : '一键整理会话已开启。', 'success', 6000);
-          if (result.sessionId) openOrganizeSession(result.sessionId);
-          await refreshAfter();
-        } catch (err) {
-          notify(err.message, 'danger');
-        }
-      };
 
       const detachSkill = async (sceneId, skillName) => {
         if (busyAction) return;
@@ -2519,29 +2535,16 @@ details.sg-card[open] > summary {
 
       return h('div', { className: 'sg-panel-section' },
         h('div', { className: 'sg-section-head' },
-          h('div', null,
-            h('h2', { className: 'sg-section-title' }, '场景树管理'),
-            h('p', { className: 'sg-section-sub' }, '单根、不限深度；技能可挂载到多个场景。')),
+          h('div', { className: 'sg-section-title-row' },
+            h('div', null,
+              h('h2', { className: 'sg-section-title' }, '场景树管理'),
+              h('p', { className: 'sg-section-sub' }, '单根、不限深度；技能可挂载到多个场景。'))),
           h('div', { className: 'sg-section-actions' },
             h('button', {
               className: 'sg-btn sg-btn-sm sg-btn-ghost',
               type: 'button',
               onClick: () => setModal({ type: 'upload', payload: null }),
             }, h(Icon, { name: 'upload' }), '上传'),
-            h('button', {
-              className: 'sg-btn sg-btn-sm sg-btn-ghost',
-              type: 'button',
-              disabled: organizeRunning,
-              title: organizeRunning ? '整理会话进行中，请等待完成' : '让 Agent 整理整棵场景树（可回滚）',
-              onClick: () => triggerOrganize('full'),
-            }, h(Icon, { name: 'layers' }), '一键整理'),
-            h('button', {
-              className: 'sg-btn sg-btn-sm sg-btn-ghost',
-              type: 'button',
-              disabled: organizeRunning,
-              title: organizeRunning ? '整理会话进行中，请等待完成' : '只读检测冲突与重复技能',
-              onClick: () => triggerOrganize('detect'),
-            }, h(Icon, { name: 'search' }), '冲突检测'),
             h('button', {
               className: 'sg-btn sg-btn-sm sg-btn-secondary',
               type: 'button',
@@ -2646,13 +2649,6 @@ details.sg-card[open] > summary {
               onAttachSkill: (skillName) => setModal({ type: 'attach-skill', payload: { skillName } }),
               onDeleteSkill: (skillName) => setModal({ type: 'delete-skill', payload: { skillName } }),
             }),
-        h(OrganizeSection, {
-          state,
-          cwd,
-          onChanged: refreshAfter,
-          notify,
-          setModal,
-        }),
         h(LocationCard, {
           location: state.location,
           onRelocate: () => setModal({ type: 'relocate', payload: null }),
@@ -3982,6 +3978,7 @@ details.sg-card[open] > summary {
 
       const tabDefs = [
         ['catalog', '场景树管理', 'layers'],
+        ['organize', '整理', 'refresh'],
         ['stats', '统计', 'stats'],
         ['gateway', '网关取用', 'gateway'],
       ];
@@ -4057,6 +4054,10 @@ details.sg-card[open] > summary {
             state
               ? h('div', { style: { display: tab === 'catalog' ? 'block' : 'none' } },
                   h(CatalogTab, { state, cwd, onChanged: refresh, notify, setModal, onOpenSession: props.onOpenSession }))
+              : null,
+            state
+              ? h('div', { style: { display: tab === 'organize' ? 'block' : 'none' } },
+                  h(OrganizeTab, { state, cwd, onChanged: refresh, notify, setModal, onOpenSession: props.onOpenSession }))
               : null,
             state
               ? h('div', { style: { display: tab === 'stats' ? 'block' : 'none' } },

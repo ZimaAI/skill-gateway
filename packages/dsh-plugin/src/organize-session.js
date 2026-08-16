@@ -282,6 +282,13 @@ export class OrganizeController {
 
     try {
       await agent.whenIdle();
+      // Persist the header now so the workspace registry can validate and
+      // attach the session to the workspace owning `key` (the current
+      // workspace, never the ungrouped one).
+      if (sessions && typeof sessions.flush === 'function') {
+        await sessions.flush(agent.session);
+      }
+      await this.attachToWorkspace(ctx, key, sessionId);
       agent.followup(createUserMessage({
         content: [{ type: 'text', text: prompt }],
         source: { kind: 'plugin', plugin: 'skill-gateway' },
@@ -306,6 +313,25 @@ export class OrganizeController {
       this.logger.warn('[skill-gateway] failed to persist organize report:', error);
     }
     return { ok: true, sessionId, report };
+  }
+
+  /**
+   * Attach a freshly created session to the workspace owning `cwd` so it
+   * appears under the current workspace instead of "未分组". The registry
+   * reuses the existing workspace for the same canonical path, so this is
+   * create-or-attach and idempotent. Best effort: failure only logs.
+   */
+  async attachToWorkspace(ctx, cwd, sessionId) {
+    const registry = getService(ctx, 'workspaceRegistry');
+    if (!registry || typeof registry.create !== 'function') return;
+    try {
+      const workspace = await registry.create(cwd, path.basename(cwd) || 'workspace');
+      if (workspace && typeof workspace.attachSession === 'function') {
+        await workspace.attachSession(sessionId);
+      }
+    } catch (error) {
+      this.logger.warn('[skill-gateway] organize session could not be attached to the current workspace (shown ungrouped):', error && error.message ? error.message : error);
+    }
   }
 
   async buildReport(key, run, preCatalog, agent, options) {
