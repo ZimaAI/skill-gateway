@@ -2808,9 +2808,10 @@ details.sg-card[open] > summary {
         setModelInfo(null);
       };
 
-      const modeOptions = (options && options.modes) || [];
-      const permissionOptions = (options && options.permissions) || [];
-      const providerOptions = (options && options.providers) || [];
+      const safeOptions = options || {};
+      const modeOptions = safeOptions.modes || [];
+      const permissionOptions = safeOptions.permissions || [];
+      const providerOptions = safeOptions.providers || [];
       const efforts = modelInfo && modelInfo.reasoning && Array.isArray(modelInfo.reasoning.efforts)
         ? [...modelInfo.reasoning.efforts]
         : [];
@@ -2834,12 +2835,12 @@ details.sg-card[open] > summary {
         efforts.push({ id: form.reasoningEffort, name: form.reasoningEffort, description: '' });
       }
 
-      const defaultModeName = modeChoices.find((item) => item.id === options.defaultMode);
-      const defaultModeLabel = defaultModeName ? defaultModeName.name : options.defaultMode;
-      const defaultPermissionName = permissionChoices.find((item) => item.id === options.defaultPermission);
-      const defaultPermissionLabel = defaultPermissionName ? defaultPermissionName.name : options.defaultPermission;
-      const currentModelLabel = options.currentModel
-        ? `${options.currentModel.provider} / ${options.currentModel.model}`
+      const defaultModeName = modeChoices.find((item) => item.id === safeOptions.defaultMode);
+      const defaultModeLabel = defaultModeName ? defaultModeName.name : safeOptions.defaultMode;
+      const defaultPermissionName = permissionChoices.find((item) => item.id === safeOptions.defaultPermission);
+      const defaultPermissionLabel = defaultPermissionName ? defaultPermissionName.name : safeOptions.defaultPermission;
+      const currentModelLabel = safeOptions.currentModel && safeOptions.currentModel.provider && safeOptions.currentModel.model
+        ? `${safeOptions.currentModel.provider} / ${safeOptions.currentModel.model}`
         : '';
 
       const fieldBlock = h('div', null,
