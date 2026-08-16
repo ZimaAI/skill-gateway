@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Skill Gateway · DeepSeek Harness 页面原型 v2</title>
+<title>Skill Gateway · DeepSeek Harness 页面原型 v2（上传改版 + Agent 整理）</title>
 <link rel="stylesheet" href="./styles.css">
 <script src="./app.js" defer></script>
 </head>
@@ -39,6 +39,12 @@
   <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.5l2.5 1.5"/></symbol>
   <symbol id="i-settings" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2M3.8 3.8l1.4 1.4M10.8 10.8l1.4 1.4M12.2 3.8l-1.4 1.4M5.2 10.8l-1.4 1.4"/></symbol>
   <symbol id="i-book" viewBox="0 0 16 16"><path d="M2.5 3h3.5A2 2 0 0 1 8 5a2 2 0 0 1 2-2h3.5v10H10a2 2 0 0 0-2 2 2 2 0 0 0-2-2H2.5V3Z"/></symbol>
+  <!-- 整理流程专用图标 -->
+  <symbol id="i-wand" viewBox="0 0 16 16"><path d="M4.5 11.5 12 4l1.5 1.5L6 13l-1.5-1.5Z"/><path d="m5 3 .6 1.4L7 5l-1.4.6L5 7l-.6-1.4L3 5l1.4-.6L5 3ZM13.5 9l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5.5-1.3ZM2.5 10l.4 1 .9.4-1 .4-.3 1-.4-1-1-.4 1-.4.4-1Z"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 16 16"><path d="M4.5 6.5H11A3.5 3.5 0 0 1 11 13H8.5"/><path d="M7.5 3 4 6.5 7.5 10"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/></symbol>
+  <symbol id="i-box" viewBox="0 0 16 16"><path d="M2.5 5 8 2l5.5 3v6L8 14l-5.5-3V5Z"/><path d="M2.5 5 8 8l5.5-3M8 8v6"/></symbol>
+  <symbol id="i-radar" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 8 13 3M8 8l4 4.5M8 8 3.5 12M8 8 3 4"/><circle cx="8" cy="8" r="1"/></symbol>
 </svg>
 
 <!-- 原型控制条 -->
@@ -46,9 +52,9 @@
   <div class="proto-brand">
     <span class="proto-mark">SG</span>
     <span class="proto-title">Skill Gateway 页面原型</span>
-    <span class="proto-badge">VERSION 2</span>
+    <span class="proto-badge">VERSION 2 · ORGANIZE</span>
   </div>
-  <p class="proto-note">按 docs/style/deepseek/design.md 规范构建 · 状态仅存内存，刷新即重置 · 场景树上传依赖浏览器 File API</p>
+  <p class="proto-note">按 docs/style/deepseek/design.md 规范构建 · 上传只收集技能、整理会话可见可打断、快照一键回滚 · 状态仅存内存，刷新即重置</p>
   <div class="proto-actions">
     <button id="mock-agent-skill" class="btn btn-sm btn-ghost" type="button">
       <svg class="icon"><use href="#i-skill"/></svg>模拟默认 skill 调用
@@ -63,55 +69,38 @@
 </header>
 
 <div class="app">
-  <!-- DSH 左侧导航（设计规范中的侧边导航栏） -->
+  <!-- DSH 左侧导航（设计规范中的侧边导航栏，会话列表由 JS 动态渲染） -->
   <aside class="rail">
     <div class="rail-logo">
       <span class="proto-mark">DS</span>
       <span class="rail-logo-name">DeepSeek Harness</span>
     </div>
     <div class="rail-new">
-      <button class="btn btn-primary" type="button">
+      <button id="new-chat-btn" class="btn btn-primary" type="button">
         <svg class="icon"><use href="#i-plus"/></svg>新建对话
       </button>
     </div>
-    <nav class="rail-sessions">
-      <div class="rail-group">历史会话</div>
-      <button class="rail-item is-active" type="button">
-        <svg class="icon"><use href="#i-chat"/></svg>
-        <span class="rail-item-text">SQL 索引评审与迁移</span>
-      </button>
-      <button class="rail-item" type="button">
-        <svg class="icon"><use href="#i-chat"/></svg>
-        <span class="rail-item-text">React 组件库重构</span>
-      </button>
-      <button class="rail-item" type="button">
-        <svg class="icon"><use href="#i-chat"/></svg>
-        <span class="rail-item-text">网关技能目录整理</span>
-      </button>
-      <button class="rail-item" type="button">
-        <svg class="icon"><use href="#i-chat"/></svg>
-        <span class="rail-item-text">API 设计评审</span>
-      </button>
-    </nav>
+    <nav class="rail-sessions" id="rail-sessions" aria-label="会话列表"></nav>
     <div class="rail-account">
       <span class="avatar">Z</span>
       <span class="rail-account-name">zima@local-workspace</span>
     </div>
   </aside>
 
-  <!-- DSH 会话画布（陪衬，真实产品中 Agent 通过 skill_gateway 工具取用技能） -->
+  <!-- DSH 会话画布（陪衬，真实产品中 Agent 在会话内使用工具） -->
   <main class="workspace">
     <div class="chat-header">
-      <div>
-        <div class="chat-header-title">SQL 索引评审与迁移</div>
-        <div class="chat-header-sub">session_20250815_a1b2 · gateway 已开启</div>
+      <div style="min-width:0;flex:1">
+        <div class="chat-header-title" id="chat-header-title">SQL 索引评审与迁移</div>
+        <div class="chat-header-sub" id="chat-header-sub">session_20250815_a1b2 · gateway 已开启</div>
       </div>
+      <div class="chat-header-actions" id="chat-header-actions"></div>
     </div>
     <div class="chat-feed" id="chat-feed"></div>
     <div class="chat-composer">
       <div class="chat-input">
         <svg class="icon"><use href="#i-chat"/></svg>
-        在真实 DSH 中，Agent 先通过 skill_gateway 逐层浏览，再 load 选定技能。
+        <span id="chat-composer-text">在真实 DSH 中，Agent 先通过 skill_gateway 逐层浏览，再 load 选定技能。</span>
       </div>
     </div>
   </main>
@@ -124,7 +113,7 @@
       </span>
       <div class="panel-title-wrap">
         <div class="panel-title">Skill Gateway</div>
-        <div class="panel-subtitle">场景化管理 · 渐进式取用</div>
+        <div class="panel-subtitle">上传收集 · Agent 整理 · 一键回滚</div>
       </div>
       <label class="switch" title="网关开关：关闭后卸下工具与提示词，统计观察器仍生效">
         <input type="checkbox" id="gateway-toggle" checked>

@@ -1,6 +1,7 @@
 /* ==========================================================================
-   skill-gateway 页面原型 v2
-   - 纯函数核心：场景树 CRUD / 上传校验与合并 / browse / load / 使用聚合
+   skill-gateway 页面原型 v2（上传改版 + Agent 整理）
+   - 纯函数核心：场景树 CRUD / 仅收集技能的上传解析 / browse / load / 使用聚合
+   - 整理流程模拟：上传后自动分类会话、一键整理、冲突检测（只读）、快照回滚
    - UI 状态仅存内存，刷新重置；不做真实文件持久化
    - 视觉遵循 docs/style/deepseek/design.md
    ========================================================================== */
@@ -105,7 +106,7 @@ function seedCatalog() {
         tags: ['api', 'service'],
         parentId: 'root',
         children: ['database'],
-        skills: ['api-design', 'sql-review'],
+        skills: ['api-design', 'sql-review', 'api-review'],
       },
       database: {
         id: 'database',
@@ -132,7 +133,7 @@ function seedCatalog() {
         tags: ['react', 'design-system'],
         parentId: 'frontend',
         children: [],
-        skills: ['react-component', 'tdd'],
+        skills: ['react-component'],
       },
       quality: {
         id: 'quality',
@@ -156,6 +157,12 @@ function seedCatalog() {
         description: 'REST API 设计评审，核对资源建模、错误语义与幂等性。',
         createdAt: base,
         updatedAt: NOW - 4 * DAY,
+      },
+      'api-review': {
+        name: 'api-review',
+        description: 'API 接口评审清单：资源建模、错误语义与幂等性核对。',
+        createdAt: base,
+        updatedAt: NOW - 2.5 * DAY,
       },
       'sql-review': {
         name: 'sql-review',
@@ -206,6 +213,14 @@ function seedSkillFiles() {
         '# API Design Review\n\n对接口设计做结构评审。\n\n## 资源建模\n\n- 名词复数表达集合资源。\n- 子资源路径不超过两层。\n\n## 错误语义\n\n- 使用稳定的业务错误码。\n- 4xx 与 5xx 不混用。'
       ),
       'review-template.md': '# API Review\n\n| 项目 | 结论 |\n| --- | --- |\n| 资源路径 | 待核 |\n| 幂等性 | 待核 |\n| 错误码 | 待核 |',
+    },
+    'api-review': {
+      'SKILL.md': skillMd(
+        'api-review',
+        'API 接口评审清单：资源建模、错误语义与幂等性核对。',
+        '# API Review Checklist\n\n按清单核对接口设计。\n\n## 核对项\n\n- 资源路径符合名词复数约定。\n- 错误码稳定且语义明确。\n- 幂等性设计完整。'
+      ),
+      'checklist.md': '# Checklist\n\n1. 资源建模是否符合 REST 约定。\n2. 错误语义是否稳定。\n3. 写接口是否具备幂等性。',
     },
     'sql-review': {
       'SKILL.md': skillMd(
@@ -281,6 +296,13 @@ function seedChatEvents() {
   ];
 }
 
+function placeholderHistoryEvents() {
+  return [
+    { kind: 'day', text: '历史会话' },
+    { kind: 'assistant', text: '仅作界面陪衬：本原型只演示 Skill Gateway 侧边栏，历史会话内容不展开。' },
+  ];
+}
+
 /* ------------------------------------------------------------------------ */
 /* 核心纯函数（与 packages/core 行为对齐，UI 原型内联实现）                   */
 /* ------------------------------------------------------------------------ */
@@ -320,6 +342,10 @@ function sceneNameExists(catalog, name, excludeId) {
   return Object.values(catalog.scenes || {}).some(
     (scene) => scene.name === name && scene.id !== excludeId,
   );
+}
+
+function sceneByName(catalog, name) {
+  return Object.values(catalog.scenes || {}).find((scene) => scene.name === name) || null;
 }
 
 function createScene(catalog, parentId, input = {}) {
@@ -411,6 +437,16 @@ function skillPaths(catalog, skillName) {
   return Object.values(catalog.scenes || {})
     .filter((scene) => (scene.skills || []).includes(skillName))
     .map((scene) => scenePath(catalog, scene.id));
+}
+
+function unclassifiedSkills(catalog) {
+  const mounted = new Set();
+  for (const scene of Object.values(catalog.scenes || {})) {
+    (scene.skills || []).forEach((name) => mounted.add(name));
+  }
+  return Object.values(catalog.skills || {})
+    .filter((skill) => !mounted.has(skill.name))
+    .sort((a, b) => a.name.localeCompare(b.name, 'en'));
 }
 
 function browse(catalog, sceneId) {
@@ -513,7 +549,7 @@ function aggregateUsage(usage, source = 'all') {
 }
 
 /* ------------------------------------------------------------------------ */
-/* 场景树上传：校验、分类与合并                                               */
+/* 上传解析：仅收集技能（文件夹层级不再产生场景）                              */
 /* ------------------------------------------------------------------------ */
 
 function parseFrontmatter(markdown) {
@@ -552,7 +588,7 @@ function normalizeUploadFilePaths(item) {
     }
     files.push({ path: segments.join('/'), content: file.content });
   }
-  if (!files.length) reasons.push('场景树文件夹为空。');
+  if (!files.length) reasons.push('所选文件夹为空。');
   return { files, reasons };
 }
 
@@ -590,35 +626,23 @@ function isInsideDir(dirPath, parentDir) {
   return dirPath === parentDir || dirPath.startsWith(`${parentDir}/`);
 }
 
-function parentSegments(dirPath) {
-  if (!dirPath) return [];
-  const segments = dirPath.split('/').filter(Boolean);
-  return segments.slice(0, -1);
-}
-
-function analyzeSceneTree(item) {
+function analyzeUpload(item) {
   const source = Array.isArray(item) ? { files: item } : item || {};
   const name = String(source.name || '').trim();
   const normalized = normalizeUploadFilePaths(source);
   if (normalized.reasons.length) return { ok: false, reasons: normalized.reasons, name };
 
   const dirs = buildDirIndex(normalized.files);
+
+  // 递归收集技能：含直接 SKILL.md 的文件夹整体为一个技能（子树资源全部保留）；
+  // 已进入某个技能文件夹的子目录不再单独识别为技能。
   const skillDirs = [];
   for (const dirPath of [...dirs.keys()].sort(compareDirPaths)) {
     if (skillDirs.some((skillDir) => isInsideDir(dirPath, skillDir))) continue;
     if (dirs.get(dirPath).files.has('SKILL.md')) skillDirs.push(dirPath);
   }
-
-  const sceneDirs = [...dirs.keys()]
-    .filter((dirPath) => {
-      if (skillDirs.includes(dirPath)) return false;
-      return !skillDirs.some((skillDir) => isInsideDir(dirPath, skillDir));
-    })
-    .sort(compareDirPaths);
-
-  const nonRootScenes = sceneDirs.filter((dirPath) => dirPath !== '');
-  if (!skillDirs.length && !nonRootScenes.length) {
-    return { ok: false, reasons: ['场景树中没有可导入的场景或技能。'], name };
+  if (!skillDirs.length) {
+    return { ok: false, reasons: ['所选文件夹中没有找到任何技能（未发现含直接 SKILL.md 的文件夹）。'], name };
   }
 
   const reasons = [];
@@ -665,19 +689,19 @@ function analyzeSceneTree(item) {
 
     skills.push({
       folder: skillDir,
-      parentPath: parentSegments(skillDir),
       name: skillName,
       description,
       files: renderedFiles,
     });
   }
 
+  // 技能文件夹之外的散文件 → 忽略清单
   const ignoredFiles = normalized.files
-    .map((file) => {
-      const dirPath = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
-      return { file, dirPath };
-    })
-    .filter((entry) => sceneDirs.includes(entry.dirPath))
+    .map((file) => ({
+      file,
+      dirPath: file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '',
+    }))
+    .filter((entry) => !skillDirs.some((skillDir) => isInsideDir(entry.dirPath, skillDir)))
     .map((entry) => entry.file.path)
     .sort();
 
@@ -685,97 +709,573 @@ function analyzeSceneTree(item) {
     ok: reasons.length === 0,
     reasons,
     name,
-    sceneDirs,
-    nonRootScenes,
     skills,
     ignoredFiles,
     fileCount: normalized.files.length,
   };
 }
 
-function importSceneTree(catalog, item) {
+function mergeUpload(catalog, item) {
   if (!catalog || !catalog.scenes || !catalog.skills || !catalog.rootSceneId || !catalog.scenes[catalog.rootSceneId]) {
     return { ok: false, reasons: ['目录无效。'] };
   }
-  const analyzed = analyzeSceneTree(item);
+  const analyzed = analyzeUpload(item);
   if (!analyzed.ok) return { ok: false, reasons: analyzed.reasons, name: analyzed.name };
 
   const next = clone(catalog);
-  const scenesCreated = [];
-  const scenesReused = new Set();
-  let mergeError = null;
-
-  const ensureScenePath = (segments) => {
-    let parent = next.scenes[next.rootSceneId];
-    for (const segment of segments) {
-      const name = String(segment || '').trim();
-      if (!name) {
-        mergeError = `上传路径包含空场景名称：${segments.join(' / ')}`;
-        return null;
-      }
-      const childId = (parent.children || []).find((id) => next.scenes[id] && next.scenes[id].name === name);
-      if (childId) {
-        if (!scenesCreated.includes(childId)) scenesReused.add(childId);
-        parent = next.scenes[childId];
-        continue;
-      }
-      const duplicate = Object.values(next.scenes).find((scene) => scene.name === name);
-      if (duplicate) {
-        mergeError = `场景名称已存在但不在上传路径中：${name}`;
-        return null;
-      }
-      const scene = { id: makeId('scene'), name, description: '', tags: [], parentId: parent.id, children: [], skills: [] };
-      next.scenes[scene.id] = scene;
-      parent.children.push(scene.id);
-      scenesCreated.push(scene.id);
-      parent = scene;
-    }
-    return parent;
-  };
-
-  for (const dirPath of analyzed.nonRootScenes) {
-    if (!ensureScenePath(dirPath.split('/').filter(Boolean))) {
-      return { ok: false, reasons: [mergeError], name: analyzed.name };
-    }
-  }
-
-  const originalSkillNames = new Set(Object.keys(catalog.skills || {}));
-  const importedSkillNames = new Set();
-  const updatedSkillNames = new Set();
-  const mergedSkills = new Map();
-
+  const added = [];
+  const overwritten = [];
   for (const skill of analyzed.skills) {
-    const targetScene = ensureScenePath(skill.parentPath);
-    if (!targetScene) return { ok: false, reasons: [mergeError], name: analyzed.name };
-
-    importedSkillNames.add(skill.name);
     const existing = next.skills[skill.name];
-    if (existing) updatedSkillNames.add(skill.name);
+    // 同名技能原地覆盖：createdAt 与使用历史保留
     next.skills[skill.name] = {
       name: skill.name,
       description: skill.description,
       createdAt: existing ? existing.createdAt : NOW,
       updatedAt: NOW,
     };
-    if (!targetScene.skills.includes(skill.name)) targetScene.skills.push(skill.name);
-    mergedSkills.set(skill.name, skill);
+    if (existing) overwritten.push(skill.name);
+    else added.push(skill.name);
   }
 
   return {
     ok: true,
     catalog: next,
     name: analyzed.name,
-    scenesCreated,
-    scenesReused: [...scenesReused],
-    sceneCounts: { created: scenesCreated.length, reused: scenesReused.size },
-    skills: [...mergedSkills.values()],
-    skillNames: [...importedSkillNames].sort(),
-    skillsImported: analyzed.skills.length,
-    skillsCreated: analyzed.skills.filter((skill) => !originalSkillNames.has(skill.name)).length,
-    skillsUpdated: analyzed.skills.filter((skill) => originalSkillNames.has(skill.name)).length,
-    fileCount: analyzed.fileCount,
+    skills: analyzed.skills,
+    added,
+    overwritten,
     ignoredFiles: analyzed.ignoredFiles,
+    fileCount: analyzed.fileCount,
   };
+}
+
+/* ------------------------------------------------------------------------ */
+/* 整理会话：提示词、计划模拟与执行                                           */
+/* ------------------------------------------------------------------------ */
+
+const MODE_LABEL = { classify: '自动分类', tidy: '一键整理', detect: '冲突检测' };
+const MODE_BADGE = { classify: 'primary', tidy: 'warning', detect: 'neutral' };
+
+function sceneSummary(catalog) {
+  const lines = [];
+  const walk = (sceneId, depth) => {
+    const scene = catalog.scenes[sceneId];
+    if (!scene) return;
+    const skills = (scene.skills || []).length ? `（直接技能：${(scene.skills || []).join('、')}）` : '';
+    lines.push(`${'  '.repeat(depth)}- ${scene.name}：${scene.description || '（无描述）'}${skills}`);
+    (scene.children || []).forEach((childId) => walk(childId, depth + 1));
+  };
+  walk(catalog.rootSceneId, 0);
+  return lines.join('\n');
+}
+
+function buildOrganizePrompt(mode, title, uploaded, overwritten) {
+  const unclassified = unclassifiedSkills(state.catalog);
+  const modeLine = mode === 'classify'
+    ? '自动分类（仅处理本批上传技能）'
+    : mode === 'detect'
+      ? '冲突检测（只读，禁止任何修改）'
+      : '一键整理（整树整理）';
+  return [
+    title,
+    `模式：${modeLine}`,
+    '可用工具：skill_organize（createScene / updateScene / deleteScene / moveScene / attachSkill / detachSkill）、skill_gateway（browse / load）。',
+    '',
+    '场景摘要（name + description + 直接挂载技能）：',
+    sceneSummary(state.catalog),
+    '',
+    '未分类技能：',
+    unclassified.length
+      ? unclassified.map((skill) => `- ${skill.name}：${skill.description}`).join('\n')
+      : '（无）',
+    '',
+    mode === 'classify'
+      ? `本批上传技能：${(uploaded || []).join('、') || '（无新增）'}${overwritten && overwritten.length ? `；同名覆盖：${overwritten.join('、')}（保留 createdAt 与使用历史）` : ''}。任务：把本批技能归入最合适的场景；没有合适场景时新建场景（必须填写 name 与详细 description）；可多挂但需说明理由；禁止修改技能文件与描述、禁止删除技能；完成后输出整理报告（改动摘要 + 覆盖清单）。`
+      : mode === 'detect'
+        ? '任务：检测场景树中的冲突——内容高度相似的重复技能、语义重叠的模糊场景、挂载过散的技能，输出检测报告；明确禁止调用任何修改类工具。'
+        : '任务：澄清场景边界、删除多余场景、归类未分类技能、补写场景描述；报告列出冲突与重复技能；禁止修改技能文件与描述、禁止删除技能；完成后输出整理报告。',
+    '',
+    '技能全文不嵌入提示词：需要时通过 skill_gateway browse/load 按需深读。',
+  ].join('\n');
+}
+
+// 分类会话的归属建议：按技能内容关键词匹配现有场景，否则给出应新建的场景
+function suggestSceneFor(skill) {
+  const text = `${skill.name} ${skill.description}`.toLowerCase();
+  if (/sql|数据库|索引|迁移|migration/.test(text)) return { sceneName: '数据库设计', description: null };
+  if (/api|接口|rest|幂等/.test(text)) return { sceneName: '后端开发', description: null };
+  if (/react|组件|前端|设计系统/.test(text)) return { sceneName: '组件开发', description: null };
+  if (/测试|tdd|质量/.test(text)) return { sceneName: '测试与质量', description: null };
+  if (/运维|监控|slo|可靠性|事故|告警|复盘/.test(text)) return { sceneName: '运维与可靠性', description: '线上系统运维、事故复盘、可观测性与 SLO 监控相关技能。' };
+  return { sceneName: '技能收纳', description: '整理会话为本批暂无明确归属的技能创建的过渡场景，建议人工细分或改挂到更合适的场景。' };
+}
+
+function buildClassifyPlan(session) {
+  const c = state.catalog;
+  const steps = [];
+  const uploaded = (session.uploaded || []).map((name) => c.skills[name]).filter(Boolean);
+
+  steps.push({
+    tool: { name: 'skill_gateway', action: 'browse', args: { action: 'browse' } },
+    result: '根场景「工作台」，直接子场景：后端开发 / 前端开发 / 测试与质量。',
+  });
+  steps.push({
+    assistant: `收到本批 ${uploaded.length} 个新技能${session.overwritten.length ? `，另有同名覆盖 ${session.overwritten.length} 个（原地覆盖、保留使用历史）` : ''}。逐一读取内容后决定归属。`,
+  });
+
+  for (const skill of uploaded) {
+    steps.push({
+      tool: { name: 'skill_gateway', action: 'load', args: { action: 'load', skillName: skill.name } },
+      result: `返回 ${Object.keys(state.skillFiles[skill.name] || {}).length} 个文件（含 SKILL.md 全文）。`,
+    });
+    const suggestion = suggestSceneFor(skill);
+    const existing = sceneByName(c, suggestion.sceneName);
+    if (existing) {
+      steps.push({
+        tool: { name: 'skill_organize', action: 'attachSkill', args: { action: 'attachSkill', sceneId: existing.id, skillName: skill.name } },
+        result: `已挂载 ${skill.name} → ${existing.name}。`,
+        apply: (cat) => attachSkill(cat, existing.id, skill.name),
+        reason: `「${skill.name}」的内容与「${existing.name}」的用途匹配。`,
+        change: `归类技能：${skill.name} → ${existing.name}`,
+      });
+    } else {
+      steps.push({
+        createAndAttach: { name: suggestion.sceneName, description: suggestion.description, skillName: skill.name },
+        tool: { name: 'skill_organize', action: 'createScene', args: { action: 'createScene', parentId: c.rootSceneId, name: suggestion.sceneName, description: suggestion.description } },
+        result: `已创建场景「${suggestion.sceneName}」（含详细 description）并挂载 ${skill.name}。`,
+      });
+    }
+  }
+
+  steps.push({ assistant: '归类完成：本批技能均已进入场景，未分类分组已清空。' });
+  return { steps, conflicts: [] };
+}
+
+function buildTidyPlan() {
+  const c = state.catalog;
+  const steps = [];
+  const conflicts = [];
+
+  const toolStep = (tool, result, extra = {}) => ({ tool, result, ...extra });
+
+  steps.push({
+    tool: { name: 'skill_gateway', action: 'browse', args: { action: 'browse' } },
+    result: '根场景「工作台」，直接子场景：后端开发 / 前端开发 / 测试与质量。',
+  });
+  steps.push({ assistant: '开始整树整理：先补写场景描述澄清边界，再收拢分散挂载，最后删除冗余场景；疑似重复技能按需深读比对。' });
+
+  const database = sceneByName(c, '数据库设计');
+  if (database && !String(database.description || '').includes('执行计划')) {
+    const description = '表结构、索引、迁移与查询性能相关技能；执行计划与索引评审收拢于此。';
+    steps.push(toolStep(
+      { name: 'skill_organize', action: 'updateScene', args: { action: 'updateScene', sceneId: database.id, description } },
+      '已补写「数据库设计」的 description，澄清与 SQL 评审的边界。',
+      {
+        apply: (cat) => updateScene(cat, database.id, { description }),
+        change: '补写场景描述：数据库设计',
+      },
+    ));
+  }
+
+  const backend = sceneByName(c, '后端开发');
+  if (backend && (backend.skills || []).includes('sql-review')) {
+    steps.push(toolStep(
+      { name: 'skill_organize', action: 'detachSkill', args: { action: 'detachSkill', sceneId: backend.id, skillName: 'sql-review' } },
+      '已解链 sql-review ← 后端开发（收拢为单挂载）。',
+      {
+        apply: (cat) => detachSkill(cat, backend.id, 'sql-review'),
+        reason: 'sql-review 的语义归属「数据库设计」，后端开发不再重复挂载。',
+        change: '收拢挂载：sql-review 仅保留于数据库设计',
+      },
+    ));
+  }
+
+  const frontend = sceneByName(c, '前端开发');
+  if (frontend && (frontend.skills || []).includes('react-component')) {
+    steps.push(toolStep(
+      { name: 'skill_organize', action: 'detachSkill', args: { action: 'detachSkill', sceneId: frontend.id, skillName: 'react-component' } },
+      '已解链 react-component ← 前端开发（收拢为单挂载）。',
+      {
+        apply: (cat) => detachSkill(cat, frontend.id, 'react-component'),
+        reason: 'react-component 归属「组件开发」，前端开发不重复挂载。',
+        change: '收拢挂载：react-component 仅保留于组件开发',
+      },
+    ));
+  }
+
+  const quality = sceneByName(c, '测试与质量');
+  const components = sceneByName(c, '组件开发');
+  if (quality && components && (quality.skills || []).includes('tdd')) {
+    steps.push(toolStep(
+      { name: 'skill_organize', action: 'detachSkill', args: { action: 'detachSkill', sceneId: quality.id, skillName: 'tdd' } },
+      '已解链 tdd ← 测试与质量。',
+      {
+        apply: (cat) => detachSkill(cat, quality.id, 'tdd'),
+        reason: 'move = detach + attach：把 tdd 移动到「组件开发」。',
+        change: '移动挂载：tdd 测试与质量 → 组件开发',
+      },
+    ));
+    steps.push(toolStep(
+      { name: 'skill_organize', action: 'attachSkill', args: { action: 'attachSkill', sceneId: components.id, skillName: 'tdd' } },
+      '已挂载 tdd → 组件开发。',
+      { apply: (cat) => attachSkill(cat, components.id, 'tdd') },
+    ));
+  }
+
+  if (quality) {
+    steps.push(toolStep(
+      { name: 'skill_organize', action: 'deleteScene', args: { action: 'deleteScene', sceneId: quality.id } },
+      '已删除「测试与质量」（无直接技能，边界与「组件开发」重叠）。',
+      {
+        apply: (cat) => {
+          const target = cat.scenes[quality.id];
+          if (!target) return { ok: true, catalog: cat, changed: false, note: '「测试与质量」已不存在，跳过删除。' };
+          if ((target.skills || []).length) {
+            return { ok: true, catalog: cat, changed: false, note: '「测试与质量」仍有直接技能，跳过删除。' };
+          }
+          const removed = deleteScene(cat, quality.id);
+          if (!removed.ok) return removed;
+          return { ok: true, catalog: removed.catalog, changed: true, note: '已删除「测试与质量」（无直接技能，边界与「组件开发」重叠）。' };
+        },
+        change: '删除场景：测试与质量（技能已解链回未分类）',
+      },
+    ));
+  }
+
+  // 硬约束演示：技能文件/描述只读、技能删除仅用户可操作
+  steps.push({
+    rejected: true,
+    tool: { name: 'skill_organize', action: 'updateSkill', args: { action: 'updateSkill', skillName: 'api-design', description: '改写为：…' } },
+    reject: '硬约束：技能文件与技能描述对 Agent 只读，任何修改请求被拒绝。',
+  });
+  steps.push({
+    rejected: true,
+    tool: { name: 'skill_organize', action: 'deleteSkill', args: { action: 'deleteSkill', skillName: 'api-review' } },
+    reject: '硬约束：技能删除（含文件清理）仅用户可操作，Agent 请求被拒绝。',
+  });
+
+  steps.push({ assistant: '整理完成。所有改动经 skill_organize 即时校验并持久化；报告包含冲突与重复清单，可一键回滚。' });
+
+  conflicts.push(
+    { kind: 'dup', tag: '重复技能', text: 'api-design 与 api-review：SKILL.md 内容高度相似（资源建模、错误语义、幂等性），建议人工合并后删除其一。' },
+    { kind: 'overlap', tag: '语义重叠', text: '「测试与质量」与「组件开发」：tdd 双挂载、边界模糊——本次已删除「测试与质量」解决。' },
+    { kind: 'scatter', tag: '挂载过散', text: 'sql-review（后端开发/数据库设计）、react-component（前端开发/组件开发）、tdd（组件开发/测试与质量）——本次已收拢为单挂载。' },
+  );
+  return { steps, conflicts };
+}
+
+function buildDetectPlan() {
+  const c = state.catalog;
+  const steps = [];
+
+  steps.push({
+    tool: { name: 'skill_gateway', action: 'browse', args: { action: 'browse' } },
+    result: '根场景「工作台」，直接子场景：后端开发 / 前端开发 / 测试与质量。',
+  });
+  steps.push({ assistant: '只读检测：逐场景核对元数据，对疑似重复技能深读 SKILL.md 全文比对；不做任何修改。' });
+
+  const backend = sceneByName(c, '后端开发');
+  if (backend) {
+    steps.push({
+      tool: { name: 'skill_gateway', action: 'browse', args: { action: 'browse', sceneId: backend.id } },
+      result: '「后端开发」直接技能：api-design、sql-review、api-review。',
+    });
+  }
+  steps.push({
+    tool: { name: 'skill_gateway', action: 'load', args: { action: 'load', skillName: 'api-design' } },
+    result: '返回 api-design 的 SKILL.md 与 review-template.md。',
+  });
+  steps.push({
+    tool: { name: 'skill_gateway', action: 'load', args: { action: 'load', skillName: 'api-review' } },
+    result: '返回 api-review 的 SKILL.md 与 checklist.md。',
+  });
+  steps.push({ assistant: '比对完成：两份 SKILL.md 的检查项高度重合，判定为重复技能。输出检测报告，场景树未做任何改动。' });
+
+  const conflicts = [
+    { kind: 'dup', tag: '重复技能', text: 'api-design 与 api-review：SKILL.md 内容高度相似（资源建模、错误语义、幂等性），建议人工合并后删除其一。' },
+    { kind: 'overlap', tag: '语义重叠', text: '「测试与质量」与「组件开发」：tdd 双挂载、场景边界模糊，建议澄清或合并场景。' },
+    { kind: 'scatter', tag: '挂载过散', text: 'sql-review 挂载 2 处（后端开发、数据库设计）；react-component 挂载 2 处（前端开发、组件开发）；tdd 挂载 2 处（组件开发、测试与质量）。' },
+  ];
+  return { steps, conflicts };
+}
+
+function startOrganizeSession(mode, options = {}) {
+  if (state.organizeRunning) {
+    return { ok: false, error: '已有整理会话在运行：同一时间只允许一个整理会话。' };
+  }
+  const now = new Date();
+  const title = `技能整理 #${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+  const session = {
+    id: makeId('sess'),
+    kind: 'organize',
+    mode,
+    title,
+    status: 'running',
+    createdAt: now.getTime(),
+    events: [],
+    changes: [],
+    conflicts: [],
+    rejected: [],
+    uploaded: options.uploaded || [],
+    overwritten: options.overwritten || [],
+    plan: null,
+    stepIndex: 0,
+    timer: null,
+    interrupted: false,
+  };
+
+  // 会话开始前按整理槽位打快照；冲突检测只读，不打快照
+  if (mode !== 'detect') {
+    state.snapshots.organize = {
+      at: now.getTime(),
+      catalog: clone(state.catalog),
+      slotLabel: MODE_LABEL[mode],
+    };
+  }
+
+  session.events.push({
+    kind: 'system',
+    title: `系统注入 · 整理提示词（${MODE_LABEL[mode]}）`,
+    text: buildOrganizePrompt(mode, title, session.uploaded, session.overwritten),
+    timestamp: now.getTime(),
+  });
+
+  const plan = mode === 'classify' ? buildClassifyPlan(session) : mode === 'tidy' ? buildTidyPlan() : buildDetectPlan();
+  session.plan = plan.steps;
+  session.conflicts = plan.conflicts || [];
+
+  state.sessions.unshift(session);
+  state.organizeRunning = true;
+  state.activeSessionId = session.id;
+
+  runNextOrganizeStep(session);
+  return { ok: true, session };
+}
+
+function applyOrganizeStep(session, step) {
+  const events = [];
+  let resultText = step.result || '';
+
+  if (step.rejected) {
+    events.push({
+      kind: 'reject',
+      title: `skill_organize · ${step.tool.action}（被拒）`,
+      text: `${JSON.stringify(step.tool.args, null, 2)}\n→ ${step.reject}`,
+      timestamp: Date.now(),
+    });
+    return events;
+  }
+
+  if (step.tool) {
+    if (step.apply) {
+      const result = step.apply(state.catalog);
+      if (result.ok) {
+        state.catalog = result.catalog;
+        if (result.changed !== false && step.change) session.changes.push(step.change);
+        if (result.note) resultText = result.note;
+      } else {
+        resultText = `错误：${result.error}`;
+      }
+    } else if (step.createAndAttach) {
+      const { name, description, skillName } = step.createAndAttach;
+      let scene = sceneByName(state.catalog, name);
+      if (!scene) {
+        const created = createScene(state.catalog, state.catalog.rootSceneId, { name, description });
+        if (!created.ok) {
+          resultText = `错误：${created.error}`;
+        } else {
+          state.catalog = created.catalog;
+          scene = state.catalog.scenes[created.sceneId];
+          session.changes.push(`新建场景：${name}（含详细 description）`);
+        }
+      }
+      if (scene) {
+        const attached = attachSkill(state.catalog, scene.id, skillName);
+        if (!attached.ok) {
+          resultText = `错误：${attached.error}`;
+        } else {
+          state.catalog = attached.catalog;
+          session.changes.push(`归类技能：${skillName} → ${scene.name}`);
+        }
+      }
+    }
+    events.push({
+      kind: 'tool',
+      title: `${step.tool.name} · ${step.tool.action}`,
+      text: `${JSON.stringify(step.tool.args, null, 2)}\n→ ${resultText}${step.reason ? `（理由：${step.reason}）` : ''}`,
+      timestamp: Date.now(),
+    });
+  }
+
+  if (step.assistant) {
+    events.push({ kind: 'assistant', text: step.assistant, timestamp: Date.now() });
+  }
+  return events;
+}
+
+function runNextOrganizeStep(session) {
+  if (session.status !== 'running') return;
+  const step = session.plan[session.stepIndex];
+  if (!step) {
+    finishOrganizeSession(session);
+    return;
+  }
+  session.events.push(...applyOrganizeStep(session, step));
+  session.stepIndex += 1;
+  renderAll();
+  session.timer = window.setTimeout(() => runNextOrganizeStep(session), 950);
+}
+
+function finishOrganizeSession(session) {
+  session.status = 'done';
+  session.finishedAt = Date.now();
+  state.organizeRunning = false;
+  session.events.push({
+    kind: 'assistant',
+    text: `整理完成。改动摘要 ${session.changes.length} 条${session.conflicts.length ? `，冲突与重复 ${session.conflicts.length} 项` : ''}，报告已持久化（侧边栏「场景树管理 → 整理报告」可查看与回滚）。`,
+    timestamp: Date.now(),
+  });
+  state.report = {
+    mode: session.mode,
+    status: 'done',
+    sessionId: session.id,
+    title: session.title,
+    startedAt: session.createdAt,
+    finishedAt: session.finishedAt,
+    changes: session.changes,
+    conflicts: session.conflicts,
+    overwritten: session.overwritten || [],
+  };
+  renderAll();
+  toast(`${MODE_LABEL[session.mode]}完成：${session.changes.length} 条改动${session.conflicts.length ? `，${session.conflicts.length} 项冲突/重复` : ''}。可在报告卡片中查看并回滚。`, 'success', 5000);
+}
+
+function interruptOrganize() {
+  const session = state.sessions.find((item) => item.status === 'running');
+  if (!session) return;
+  window.clearTimeout(session.timer);
+  session.status = 'interrupted';
+  session.finishedAt = Date.now();
+  state.organizeRunning = false;
+  session.events.push({
+    kind: 'assistant',
+    text: '会话已打断：已完成修改保留、快照仍在，不会自动回滚；可随时再次触发整理。',
+    timestamp: Date.now(),
+  });
+  state.report = {
+    mode: session.mode,
+    status: 'interrupted',
+    sessionId: session.id,
+    title: session.title,
+    startedAt: session.createdAt,
+    finishedAt: session.finishedAt,
+    changes: session.changes,
+    conflicts: session.conflicts,
+    overwritten: session.overwritten || [],
+  };
+  renderAll();
+  toast('已打断整理会话：部分修改与快照保留，不会自动回滚。', 'warning', 5000);
+}
+
+function runningSession() {
+  return state.sessions.find((item) => item.status === 'running') || null;
+}
+
+function activeSession() {
+  const organize = state.sessions.find((item) => item.id === state.activeSessionId);
+  if (organize) return organize;
+  const history = state.historySessions.find((item) => item.id === state.activeSessionId) || state.historySessions[0];
+  return {
+    ...history,
+    kind: 'chat',
+    status: 'idle',
+    events: state.chatEvents[history.id] || [],
+  };
+}
+
+function sessionStatusBadge(session) {
+  if (session.status === 'running') return `<span class="badge warning rail-status"><span class="dot warning"></span>整理中</span>`;
+  if (session.status === 'interrupted') return `<span class="badge neutral rail-status">已打断</span>`;
+  if (session.status === 'done') return `<span class="badge success rail-status"><span class="dot success"></span>已完成</span>`;
+  return '';
+}
+
+/* ------------------------------------------------------------------------ */
+/* 快照与回滚                                                                */
+/* ------------------------------------------------------------------------ */
+
+function openRollbackModal(slot) {
+  const snapshot = state.snapshots[slot];
+  if (!snapshot) {
+    toast(slot === 'upload' ? '上传槽位没有快照。' : '整理槽位没有快照。', 'info');
+    return;
+  }
+  if (state.organizeRunning) {
+    toast('整理会话进行中，请等待会话结束后再回滚。', 'warning');
+    return;
+  }
+
+  if (slot === 'upload') {
+    const added = snapshot.batch.added || [];
+    const overwritten = Object.keys(snapshot.batch.overwritten || {});
+    openModal('rollback', { slot }, modalShell(
+      '回滚上传',
+      `<form data-form="rollback">
+         <div class="notice danger">${icon('warning')}将还原到<b>上传前</b>的整棵树，本次回滚影响范围：</div>
+         <ul class="reason-list" style="color:var(--ink-2);margin:8px 0 0">
+           <li>删除本批新增技能文件（${added.length} 个）：${esc(added.join('、') || '无')}</li>
+           <li>恢复被覆盖技能的原始文件（${overwritten.length} 个）：${esc(overwritten.join('、') || '无')}</li>
+           <li>还原上传前的场景树与全部挂载关系</li>
+         </ul>
+         <div class="field-hint" style="margin-top:8px">使用历史统计不受影响；回滚后上传槽位快照被清空。</div>
+       </form>`,
+      `<button class="btn btn-ghost" type="button" data-close-modal>取消</button>
+       <button class="btn btn-danger-soft" type="submit" form="rollback">回滚上传</button>`,
+      'confirm',
+    ));
+  } else {
+    const sceneCount = Object.keys(snapshot.catalog.scenes || {}).length;
+    openModal('rollback', { slot }, modalShell(
+      '回滚整理',
+      `<form data-form="rollback">
+         <div class="notice danger">${icon('warning')}将还原到<b>整理前</b>的整棵树：恢复 ${sceneCount} 个场景与全部挂载关系。</div>
+         <div class="notice success" style="margin-top:8px">${icon('check')}整理回滚只还原 catalog，技能文件不会被触碰。</div>
+         <div class="field-hint" style="margin-top:8px">回滚后整理槽位快照被清空，报告标记为已回滚。</div>
+       </form>`,
+      `<button class="btn btn-ghost" type="button" data-close-modal>取消</button>
+       <button class="btn btn-danger-soft" type="submit" form="rollback">回滚整理</button>`,
+      'confirm',
+    ));
+  }
+}
+
+function handleRollbackSubmit() {
+  const slot = modalState.payload.slot;
+  const snapshot = state.snapshots[slot];
+  if (!snapshot) {
+    toast('快照不存在或已被清空。', 'danger');
+    return;
+  }
+  state.catalog = clone(snapshot.catalog);
+  if (slot === 'upload') {
+    for (const name of snapshot.batch.added || []) delete state.skillFiles[name];
+    for (const [name, files] of Object.entries(snapshot.batch.overwritten || {})) {
+      state.skillFiles[name] = clone(files);
+    }
+  }
+  state.snapshots[slot] = null;
+  if (slot === 'organize' && state.report) state.report.rolledBack = true;
+  closeModal();
+  toast(
+    slot === 'upload'
+      ? '已回滚到上传前：新增技能文件已删除，被覆盖文件已恢复，场景树已还原。'
+      : '已回滚到整理前：场景树已整树还原，技能文件未变动。',
+    'success',
+    5000,
+  );
+  renderAll();
 }
 
 /* ------------------------------------------------------------------------ */
@@ -795,12 +1295,32 @@ const state = {
   collapsed: new Set(),
   statsSource: 'all',
   gatewayStack: ['root'],
-  chatEvents: seedChatEvents(),
+  historySessions: [
+    { id: 'hist_main', title: 'SQL 索引评审与迁移' },
+    { id: 'hist_1', title: 'React 组件库重构' },
+    { id: 'hist_2', title: '网关技能目录整理' },
+    { id: 'hist_3', title: 'API 设计评审' },
+  ],
+  chatEvents: {
+    hist_main: seedChatEvents(),
+    hist_1: placeholderHistoryEvents(),
+    hist_2: placeholderHistoryEvents(),
+    hist_3: placeholderHistoryEvents(),
+  },
+  sessions: [],            // 整理会话（运行中/已完成/已打断，保留在侧边栏）
+  activeSessionId: 'hist_main',
+  organizeRunning: false,
+  snapshots: { upload: null, organize: null },
+  report: null,
 };
 
 let modalState = { type: null, payload: null };
+let pendingUpload = null;
 
 function resetState() {
+  for (const session of state.sessions) {
+    if (session.timer) window.clearTimeout(session.timer);
+  }
   state.catalog = seedCatalog();
   state.skillFiles = seedSkillFiles();
   state.usage = seedUsage();
@@ -813,19 +1333,41 @@ function resetState() {
   state.collapsed = new Set();
   state.statsSource = 'all';
   state.gatewayStack = ['root'];
-  state.chatEvents = seedChatEvents();
+  state.sessions = [];
+  state.activeSessionId = 'hist_main';
+  state.chatEvents = {
+    hist_main: seedChatEvents(),
+    hist_1: placeholderHistoryEvents(),
+    hist_2: placeholderHistoryEvents(),
+    hist_3: placeholderHistoryEvents(),
+  };
+  state.organizeRunning = false;
+  state.snapshots = { upload: null, organize: null };
+  state.report = null;
+  pendingUpload = null;
   closeModal();
   renderAll();
 }
 
-function toast(message, kind = 'info', duration) {
+function toast(message, kind = 'info', options) {
   const root = $('#toast-root');
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
   const iconName = kind === 'success' ? 'check' : kind === 'danger' ? 'error' : kind === 'warning' ? 'warning' : 'info';
   el.innerHTML = `${icon(iconName)}<span>${esc(message)}</span>`;
+  if (options && typeof options === 'object' && options.actionLabel) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'toast-action';
+    button.textContent = options.actionLabel;
+    button.addEventListener('click', () => {
+      if (options.onAction) options.onAction();
+      el.remove();
+    });
+    el.appendChild(button);
+  }
   root.appendChild(el);
-  const timeout = duration || (kind === 'danger' || kind === 'warning' ? 5000 : 3000);
+  const timeout = typeof options === 'number' ? options : (options && options.duration) || (kind === 'danger' || kind === 'warning' ? 5000 : 3000);
   window.setTimeout(() => {
     el.style.opacity = '0';
     el.style.transition = 'opacity 0.2s ease';
@@ -845,6 +1387,13 @@ function renderAll() {
     button.classList.toggle('is-active', button.dataset.tab === state.tab);
   });
 
+  renderPanelBody();
+  renderRail();
+  renderWorkspace();
+  updatePanelToggleLabel();
+}
+
+function renderPanelBody() {
   const body = $('#panel-body');
   if (!body) return;
   body.innerHTML = '';
@@ -852,9 +1401,6 @@ function renderAll() {
   if (state.tab === 'stats') renderStats(body);
   if (state.tab === 'gateway') renderGateway(body);
   body.scrollTop = 0;
-
-  renderChatFeed();
-  updatePanelToggleLabel();
 }
 
 function containsText(value, query) {
@@ -883,11 +1429,8 @@ function sceneTreeMatches(catalog, sceneId, query) {
 function sceneOptions(catalog, selectedId, depth = 0) {
   const root = catalog.scenes[catalog.rootSceneId];
   if (!root) return '';
-  const prefix = '　'.repeat(depth);
-  return catalog.scenes[root.id].id === root.id
-    ? `<option value="${esc(root.id)}" ${root.id === selectedId ? 'selected' : ''}>${prefix}${esc(root.name)}</option>` +
-        (root.children || []).map((childId) => sceneOptionsInner(catalog, childId, selectedId, depth + 1)).join('')
-    : '';
+  return `<option value="${esc(root.id)}" ${root.id === selectedId ? 'selected' : ''}>${esc(root.name)}</option>` +
+    (root.children || []).map((childId) => sceneOptionsInner(catalog, childId, selectedId, depth + 1)).join('');
 }
 
 function sceneOptionsInner(catalog, sceneId, selectedId, depth) {
@@ -899,21 +1442,32 @@ function sceneOptionsInner(catalog, sceneId, selectedId, depth) {
 }
 
 function renderCatalog(rootEl) {
+  const busy = runningSession();
   rootEl.innerHTML = `
     <div class="panel-section">
       <div class="section-head">
         <div>
           <h2 class="section-title">场景树管理</h2>
-          <p class="section-sub">单根、不限深度；技能可挂载到多个场景。</p>
+          <p class="section-sub">上传只收集技能；未分类技能归类后才对网关可见。</p>
         </div>
         <div class="section-actions">
-          <button class="btn btn-sm btn-ghost" type="button" data-action="upload-tree">
-            ${icon('upload')}上传场景树
+          <button class="btn btn-sm btn-ghost" type="button" data-action="upload">
+            ${icon('upload')}上传
           </button>
           <button class="btn btn-sm btn-secondary" type="button" data-action="new-scene">
             ${icon('plus')}新建场景
           </button>
         </div>
+      </div>
+
+      <div class="organize-toolbar">
+        <button class="btn btn-sm btn-ghost" type="button" data-action="organize-tidy" ${busy ? 'disabled title="整理会话进行中，完成后可再次触发"' : ''}>
+          ${icon('wand')}一键整理
+        </button>
+        <button class="btn btn-sm btn-ghost" type="button" data-action="organize-detect" ${busy ? 'disabled title="整理会话进行中，完成后可再次触发"' : ''}>
+          ${icon('radar')}冲突检测
+        </button>
+        ${busy ? `<span class="organize-status">${icon('clock')}整理会话进行中：${esc(busy.title)}（可到会话画布打断）</span>` : ''}
       </div>
 
       <div class="segmented sm view-switch" id="catalog-view-switch">
@@ -927,6 +1481,9 @@ function renderCatalog(rootEl) {
       </label>
 
       <div id="catalog-view-root">${state.catalogView === 'tree' ? renderTreeCard() : renderSkillListCard()}</div>
+      ${state.catalogView === 'tree' ? renderUnclassifiedCard() : ''}
+      ${renderReportCard()}
+      ${renderRollbackCard()}
       ${renderLocationCard()}
     </div>`;
 }
@@ -938,7 +1495,7 @@ function renderLocationCard() {
       <div class="location-main">
         <div class="location-title">数据落点</div>
         <div class="location-path">./${esc(state.dataDir)}</div>
-        <div class="location-sub">catalog.json · usage.json · config.json · skills/</div>
+        <div class="location-sub">catalog.json · usage.json · config.json · skills/ · snapshots/（上传/整理两个槽位）</div>
       </div>
       <button class="btn btn-sm btn-ghost" type="button" data-action="relocate">迁移</button>
     </div>`;
@@ -955,7 +1512,7 @@ function renderTreeCard() {
         <div class="empty">
           <div class="empty-icon">${icon('search')}</div>
           <h3 class="empty-title">没有匹配的场景或技能</h3>
-          <p class="empty-desc">换个关键词，或先创建场景、上传场景树。</p>
+          <p class="empty-desc">换个关键词，或先上传技能、新建场景。</p>
           <div class="empty-actions">
             <button class="btn btn-secondary" type="button" data-action="clear-search">清除搜索</button>
           </div>
@@ -1037,7 +1594,7 @@ function renderSkillRow(skillName, sceneId, depth) {
         </div>
       </div>
       <div class="tree-actions">
-        <button class="icon-btn" type="button" data-action="detach-scene-skill" data-scene="${esc(sceneId)}" data-skill="${esc(skillName)}" title="从当前场景解除挂载">${icon('close')}</button>
+        <button class="icon-btn" type="button" data-action="detach-scene-skill" data-scene="${esc(sceneId)}" data-skill="${esc(skillName)}" title="从当前场景解除挂载（技能回到未分类）">${icon('close')}</button>
       </div>
     </div>`;
 }
@@ -1054,10 +1611,10 @@ function renderSkillListCard() {
         <div class="empty">
           <div class="empty-icon">${icon('skill')}</div>
           <h3 class="empty-title">${query ? '没有匹配的技能' : '目录中还没有技能'}</h3>
-          <p class="empty-desc">${query ? '换个关键词试试。' : '上传场景树后，含 SKILL.md 的文件夹会自动识别为技能。'}</p>
+          <p class="empty-desc">${query ? '换个关键词试试。' : '上传技能后，含 SKILL.md 的文件夹整体识别为一个技能；未分类技能会出现在「未分类」分组。'}</p>
           <div class="empty-actions">
             ${query ? `<button class="btn btn-secondary" type="button" data-action="clear-search">清除搜索</button>` : ''}
-            <button class="btn btn-ghost" type="button" data-action="upload-tree">上传场景树</button>
+            <button class="btn btn-ghost" type="button" data-action="upload">上传</button>
           </div>
         </div>
       </div>`;
@@ -1078,7 +1635,7 @@ function renderSkillListCard() {
               <div class="skill-list-main">
                 <div class="skill-name-line">
                   <span class="skill-name mono">${esc(skill.name)}</span>
-                  ${paths.length ? badge(`${paths.length} 个挂载点`, 'primary') : badge('未挂载', 'warning')}
+                  ${paths.length ? badge(`${paths.length} 个挂载点`, 'primary') : badge('未分类', 'warning')}
                 </div>
                 <div class="skill-desc">${esc(skill.description)}</div>
                 ${paths.length ? `<div class="skill-scenes">${paths.map((path) => `<span class="path-chip" title="${esc(path)}">${esc(path)}</span>`).join('')}</div>` : ''}
@@ -1086,10 +1643,141 @@ function renderSkillListCard() {
               <div class="skill-list-actions">
                 <button class="icon-btn" type="button" data-action="attach-skill" data-skill="${esc(skill.name)}" title="挂载到场景">${icon('link')}</button>
                 <button class="icon-btn" type="button" data-action="skill-detail" data-id="${esc(skill.name)}" title="查看详情与文件">${icon('eye')}</button>
-                <button class="icon-btn danger" type="button" data-action="delete-skill" data-id="${esc(skill.name)}" title="删除技能">${icon('trash')}</button>
+                <button class="icon-btn danger" type="button" data-action="delete-skill" data-id="${esc(skill.name)}" title="删除技能（仅用户可操作）">${icon('trash')}</button>
               </div>
             </div>`;
         }).join('')}
+      </div>
+    </div>`;
+}
+
+/* ----------------------------- 未分类分组 ------------------------------- */
+
+function renderUnclassifiedCard() {
+  const skills = unclassifiedSkills(state.catalog);
+  return `
+    <div class="card">
+      <div class="table-head">
+        <span class="table-title">未分类技能</span>
+        <span class="table-count">${skills.length} 个 · 网关 browse/find 不可见</span>
+      </div>
+      ${skills.length
+        ? `
+          <div class="skill-list">
+            ${skills.map((skill) => `
+              <div class="skill-list-item">
+                <span class="tree-icon">${icon('skill')}</span>
+                <div class="skill-list-main">
+                  <div class="skill-name-line">
+                    <span class="skill-name mono">${esc(skill.name)}</span>
+                    ${badge('未分类', 'warning')}
+                  </div>
+                  <div class="skill-desc">${esc(skill.description)}</div>
+                </div>
+                <div class="skill-list-actions">
+                  <button class="icon-btn" type="button" data-action="attach-skill" data-skill="${esc(skill.name)}" title="挂载到场景">${icon('link')}</button>
+                  <button class="icon-btn" type="button" data-action="skill-detail" data-id="${esc(skill.name)}" title="预览文件">${icon('eye')}</button>
+                </div>
+              </div>`).join('')}
+          </div>
+          <div class="field-hint" style="padding:8px 12px 4px">上传后、解链后的技能都会出现在这里；整理会话会自动归类，也可手动挂载到任意场景。</div>`
+        : `
+          <div class="notice success" style="margin:0 12px 12px">${icon('check')}没有未分类技能：所有技能都已挂载到场景。</div>`}
+    </div>`;
+}
+
+/* ----------------------------- 整理报告卡片 ----------------------------- */
+
+function renderReportCard() {
+  const report = state.report;
+  if (!report) {
+    return `
+      <div class="card">
+        <div class="table-head">
+          <span class="table-title">整理报告</span>
+          <span class="table-count">最近一份</span>
+        </div>
+        <div class="empty" style="padding:20px 16px 12px">
+          <div class="empty-title" style="font-size:14px">还没有整理报告</div>
+          <p class="empty-desc">上传技能会自动开启分类整理；也可以点页面头部的「一键整理」或「冲突检测」。只保留最近一份。</p>
+        </div>
+      </div>`;
+  }
+
+  const canRollback = report.mode !== 'detect' && state.snapshots.organize && !report.rolledBack && !state.organizeRunning;
+  return `
+    <div class="card report-card">
+      <div class="table-head">
+        <span class="table-title">整理报告</span>
+        <span class="table-count">${esc(formatDateTime(report.startedAt))}</span>
+      </div>
+      <div class="report-meta">
+        ${badge(MODE_LABEL[report.mode], MODE_BADGE[report.mode] || 'neutral')}
+        ${report.status === 'interrupted' ? badge('已打断 · 部分修改保留', 'warning') : badge('已完成', 'success')}
+        ${report.rolledBack ? badge('已回滚', 'danger') : ''}
+        <span class="report-title">${esc(report.title)}</span>
+      </div>
+      <div class="report-block">
+        <div class="report-block-title">改动摘要（${report.changes.length}）</div>
+        ${report.changes.length
+          ? `<ul class="report-list">${report.changes.map((change) => `<li>${esc(change)}</li>`).join('')}</ul>`
+          : '<p class="report-empty">本次没有改动场景树。</p>'}
+      </div>
+      ${report.conflicts.length ? `
+        <div class="report-block">
+          <div class="report-block-title">冲突与重复（${report.conflicts.length}）</div>
+          <ul class="report-list">
+            ${report.conflicts.map((conflict) => `
+              <li><span class="badge ${conflict.kind === 'dup' ? 'warning' : conflict.kind === 'overlap' ? 'warning' : 'neutral'}">${esc(conflict.tag)}</span>${esc(conflict.text)}</li>`).join('')}
+          </ul>
+        </div>` : ''}
+      ${report.overwritten.length ? `
+        <div class="report-block">
+          <div class="report-block-title">覆盖清单</div>
+          <ul class="report-list">
+            ${report.overwritten.map((name) => `<li><span class="mono">${esc(name)}</span>：同名上传已原地覆盖，createdAt 与使用历史保留，旧版本未保留。</li>`).join('')}
+          </ul>
+        </div>` : ''}
+      ${report.mode === 'detect'
+        ? `<div class="notice info" style="margin-top:12px">${icon('info')}冲突检测为只读会话：未打快照、未改动场景树，无回滚入口。</div>`
+        : ''}
+      ${canRollback
+        ? `<div class="report-footer">
+             <button class="btn btn-sm btn-danger-soft" type="button" data-action="rollback-organize">${icon('undo')}回滚整理（还原整树）</button>
+             <span class="field-hint">回滚仅还原 catalog，不触碰技能文件。</span>
+           </div>`
+        : ''}
+    </div>`;
+}
+
+/* ----------------------------- 快照与回滚卡片 --------------------------- */
+
+function renderRollbackCard() {
+  const uploadSnapshot = state.snapshots.upload;
+  const organizeSnapshot = state.snapshots.organize;
+  const busy = state.organizeRunning;
+  const busyTitle = busy ? ' title="整理会话进行中"' : '';
+  return `
+    <div class="card">
+      <div class="table-head">
+        <span class="table-title">快照与回滚</span>
+        <span class="table-count">每个槽位只保留最近一份</span>
+      </div>
+      <div class="slot-row">
+        <span class="slot-icon">${icon('box')}</span>
+        <div class="slot-main">
+          <div class="slot-title">上传槽位 ${uploadSnapshot ? badge(`快照 ${formatClock(uploadSnapshot.at)}`, 'primary') : badge('无快照', 'neutral')}</div>
+          <div class="slot-desc">回滚 = 还原整树 + 删除本批新增技能文件 + 恢复被覆盖原文件。</div>
+        </div>
+        <button class="btn btn-sm btn-ghost" type="button" data-action="rollback-upload" ${uploadSnapshot && !busy ? '' : 'disabled'}${busyTitle}>回滚</button>
+      </div>
+      <div class="slot-row" style="border-top:1px solid var(--line-soft)">
+        <span class="slot-icon">${icon('box')}</span>
+        <div class="slot-main">
+          <div class="slot-title">整理槽位 ${organizeSnapshot ? badge(`快照 ${formatClock(organizeSnapshot.at)} · ${organizeSnapshot.slotLabel}`, 'primary') : badge('无快照', 'neutral')}</div>
+          <div class="slot-desc">回滚 = 仅还原 catalog，技能文件不触碰；冲突检测（只读）不产生快照。</div>
+        </div>
+        <button class="btn btn-sm btn-ghost" type="button" data-action="rollback-organize" ${organizeSnapshot && !busy ? '' : 'disabled'}${busyTitle}>回滚</button>
       </div>
     </div>`;
 }
@@ -1238,7 +1926,7 @@ function renderGateway(rootEl) {
       </div>
 
       ${enabled
-        ? `<div class="notice info">${icon('info')}开关 ON：<b>skill_gateway</b> 工具已注册，系统提示词已注入。</div>`
+        ? `<div class="notice info">${icon('info')}开关 ON：<b>skill_gateway</b> 工具已注册，系统提示词已注入；未分类技能不参与 browse/find。</div>`
         : `<div class="notice danger">${icon('error')}开关 OFF：工具与提示词已卸下。<pre class="prompt-pre" style="margin-top:8px">${esc(JSON.stringify({ ok: false, action: 'browse', error: 'skill gateway 已关闭。', usageRecorded: false }, null, 2))}</pre></div>`}
 
       <div class="card">
@@ -1313,25 +2001,87 @@ function renderGateway(rootEl) {
           '1. browse() 返回根场景的直接子场景和直接技能。',
           '2. browse(sceneId) 逐层进入，不要跳过场景或猜测 scene id。',
           '3. load(skillName, scenePath?) 一次性加载选定技能的文件夹全文。',
-          '4. 有多个合适场景时可以分别进入并加载多个技能。'
+          '4. 有多个合适场景时可以分别进入并加载多个技能。',
+          '5. browse/find 只返回已挂载技能：未分类技能不可见。'
         ].join('\n'))}</pre>
       </details>
     </div>`;
 }
 
 /* ------------------------------------------------------------------------ */
-/* 渲染：会话画布（仅陪衬）                                                   */
+/* 渲染：DSH 会话列表（左侧导航）与会话画布                                   */
 /* ------------------------------------------------------------------------ */
 
-function renderChatFeed() {
+function renderRail() {
+  const rail = $('#rail-sessions');
+  if (!rail) return;
+  const renderItem = (session, isOrganize) => `
+    <button class="rail-item ${state.activeSessionId === session.id ? 'is-active' : ''}" type="button" data-session="${esc(session.id)}">
+      ${icon(isOrganize ? 'wand' : 'chat')}
+      <span class="rail-item-text">${esc(session.title)}</span>
+      ${isOrganize ? sessionStatusBadge(session) : ''}
+    </button>`;
+
+  rail.innerHTML = `
+    <div class="rail-group">历史会话</div>
+    ${state.historySessions.map((session) => renderItem(session, false)).join('')}
+    ${state.sessions.length ? `<div class="rail-group">整理会话</div>${state.sessions.map((session) => renderItem(session, true)).join('')}` : ''}`;
+}
+
+function renderWorkspace() {
+  const session = activeSession();
+
+  const titleEl = $('#chat-header-title');
+  const subEl = $('#chat-header-sub');
+  const actionsEl = $('#chat-header-actions');
+  if (titleEl) titleEl.textContent = session.title;
+  if (subEl) {
+    if (session.kind === 'organize') {
+      subEl.innerHTML = `整理会话 · ${MODE_LABEL[session.mode]} · skill_organize 已挂载 ${sessionStatusBadge(session)}`;
+    } else {
+      subEl.textContent = 'session_20250815_a1b2 · gateway 已开启';
+    }
+  }
+  if (actionsEl) {
+    actionsEl.innerHTML = session.kind === 'organize' && session.status === 'running'
+      ? `<button class="btn btn-sm btn-danger-soft" type="button" id="interrupt-organize">${icon('stop')}打断整理</button>`
+      : '';
+  }
+
   const feed = $('#chat-feed');
-  if (!feed) return;
-  feed.innerHTML = `<div class="chat-inner">${state.chatEvents.map(renderChatEvent).join('')}</div>`;
-  feed.scrollTop = feed.scrollHeight;
+  if (feed) {
+    feed.innerHTML = `<div class="chat-inner">${session.events.map(renderChatEvent).join('')}</div>`;
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  const composer = $('#chat-composer-text');
+  if (composer) {
+    composer.textContent = session.kind === 'organize'
+      ? session.status === 'running'
+        ? '整理会话进行中…可随时打断；技能文件与描述对 Agent 只读。'
+        : session.status === 'interrupted'
+          ? '会话已打断：部分修改与快照保留，不会自动回滚；可继续对话要求修正。'
+          : '整理已完成。可继续对话要求修正，或在「场景树管理 → 整理报告」中一键回滚。'
+      : '在真实 DSH 中，Agent 先通过 skill_gateway 逐层浏览，再 load 选定技能。';
+  }
 }
 
 function renderChatEvent(event) {
   if (event.kind === 'day') return `<div class="chat-day">${esc(event.text)}</div>`;
+  if (event.kind === 'system') {
+    return `
+      <div class="tool-card system-card">
+        <div class="tool-card-head">${icon('wand')}<span>${esc(event.title)}</span><span class="mono" style="color:var(--ink-4)">${esc(formatClock(event.timestamp || NOW))}</span></div>
+        <pre>${esc(event.text)}</pre>
+      </div>`;
+  }
+  if (event.kind === 'reject') {
+    return `
+      <div class="tool-card reject-card">
+        <div class="tool-card-head">${icon('warning')}<span>${esc(event.title)}</span><span class="mono" style="color:var(--ink-4)">${esc(formatClock(event.timestamp || NOW))}</span></div>
+        <pre>${esc(event.text)}</pre>
+      </div>`;
+  }
   if (event.kind === 'tool') {
     return `
       <div class="tool-card">
@@ -1346,8 +2096,12 @@ function renderChatEvent(event) {
 }
 
 function appendChatEvent(event) {
-  state.chatEvents.push({ ...event, timestamp: event.timestamp || NOW });
-  renderChatFeed();
+  const session = activeSession();
+  if (session.kind === 'chat') {
+    if (!state.chatEvents[session.id]) state.chatEvents[session.id] = [];
+    state.chatEvents[session.id].push({ ...event, timestamp: event.timestamp || NOW });
+    renderWorkspace();
+  }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1432,6 +2186,7 @@ function openSceneModal(mode, payload = {}) {
        <div class="field">
          <label class="field-label" for="scene-description">场景描述</label>
          <textarea id="scene-description" name="description" rows="3" maxlength="160" placeholder="这个场景用于完成什么目的？">${esc(scene ? scene.description : '')}</textarea>
+         <div class="field-hint">建议填写详细描述：整理会话中的 Agent 会按描述判断技能归属。</div>
        </div>
        <div class="field">
          <label class="field-label" for="scene-tags">标签</label>
@@ -1494,7 +2249,7 @@ function openDeleteSceneModal(sceneId) {
          <span class="field-label">受影响技能</span>
          ${affectedSkills.size
            ? `<div class="skill-scenes">${[...affectedSkills].map((name) => badge(name, 'neutral')).join('')}</div>
-              <div class="field-hint">技能只会从这些场景解除挂载，技能文件与历史统计都会保留。</div>`
+              <div class="field-hint">技能只会从这些场景解除挂载并回到「未分类」分组，技能文件与历史统计都会保留。</div>`
            : '<div class="field-hint">这些场景没有直接或间接挂载技能。</div>'}
        </div>
      </form>`,
@@ -1517,7 +2272,7 @@ function handleDeleteSceneSubmit() {
   }
   state.gatewayStack = [state.catalog.rootSceneId];
   closeModal();
-  toast(`已删除 ${result.deletedIds.length} 个场景，技能均已解链。`, 'success');
+  toast(`已删除 ${result.deletedIds.length} 个场景，技能均已解链回未分类。`, 'success');
   renderAll();
 }
 
@@ -1550,7 +2305,7 @@ function openSkillPickerModal(sceneId) {
              </label>`).join('')}
          </div>
        </div>
-       <div class="field-hint">一个技能可以同时挂载到多个场景；取消勾选只会解除当前场景的挂载。</div>
+       <div class="field-hint">一个技能可以同时挂载到多个场景；取消勾选只会解除当前场景的挂载（技能回到未分类）。</div>
      </form>`,
     `<button class="btn btn-ghost" type="button" data-close-modal>取消</button>
      <button class="btn btn-primary" type="submit" form="skill-picker">保存挂载</button>`,
@@ -1601,12 +2356,14 @@ function openAttachSkillModal(skillName) {
   const firstPath = skillPaths(state.catalog, skillName)[0];
   const scene = Object.values(state.catalog.scenes).find((item) => scenePath(state.catalog, item.id) === firstPath);
   const selectedId = scene ? scene.id : state.selectedSceneId;
+  const isUnclassified = !firstPath;
 
   openModal('attach-skill', { skillName }, modalShell(
     '挂载技能到场景',
     `<form data-form="attach-skill">
        <input type="hidden" name="skillName" value="${esc(skillName)}">
        <div class="notice info" style="margin-bottom:16px">${icon('skill')}${esc(skillName)}：${esc(skill.description)}</div>
+       ${isUnclassified ? `<div class="notice warning" style="margin-bottom:12px">${icon('warning')}该技能当前未分类：网关 browse/find 不会返回它，挂载后立即可见。</div>` : ''}
        <div class="field">
          <label class="field-label" for="attach-scene-select">目标场景</label>
          <select id="attach-scene-select" name="sceneId">${sceneOptions(state.catalog, selectedId)}</select>
@@ -1628,7 +2385,7 @@ function handleAttachSkillSubmit(form) {
   }
   state.catalog = result.catalog;
   closeModal();
-  toast(result.added ? `已挂载到「${state.catalog.scenes[sceneId].name}」。` : '该场景已挂载此技能。', result.added ? 'success' : 'info');
+  toast(result.added ? `已挂载到「${state.catalog.scenes[sceneId].name}」，技能已移出未分类。` : '该场景已挂载此技能。', result.added ? 'success' : 'info');
   renderAll();
 }
 
@@ -1639,6 +2396,7 @@ function openSkillDetailModal(skillName) {
   if (!skill) return;
   const files = state.skillFiles[skillName] || {};
   const paths = skillPaths(state.catalog, skillName);
+  const isUnclassified = !paths.length;
 
   openModal('skill-detail', { skillName }, modalShell(
     `技能详情 · ${skillName}`,
@@ -1655,7 +2413,7 @@ function openSkillDetailModal(skillName) {
        <span class="field-label">挂载场景（${paths.length}）</span>
        ${paths.length
          ? `<div class="skill-scenes">${paths.map((path) => `<span class="path-chip" title="${esc(path)}">${esc(path)}</span>`).join('')}</div>`
-         : `<div class="notice warning">${icon('warning')}尚未挂载到任何场景，Agent 无法经场景树发现该技能。</div>`}
+         : `<div class="notice warning">${icon('warning')}未分类：尚未挂载到任何场景，网关 browse/find 不会返回该技能；可手动挂载或由整理会话归类。</div>`}
      </div>
      <div class="field">
        <span class="field-label">技能文件夹（${Object.keys(files).length} 个文件）</span>
@@ -1667,7 +2425,7 @@ function openSkillDetailModal(skillName) {
        </div>
        <div class="field-hint">管理面板中的文件预览不会记录使用；只有 skill_gateway load 才记录 gateway 使用。</div>
      </div>`,
-    `<button class="btn btn-danger-soft" type="button" data-action="modal-delete-skill">删除技能</button>
+    `<button class="btn btn-danger-soft" type="button" data-action="modal-delete-skill">删除技能（仅用户可操作）</button>
      <button class="btn btn-ghost" type="button" data-close-modal>关闭</button>`,
     'large',
   ));
@@ -1712,7 +2470,7 @@ function refreshFilePreview(file) {
   });
 }
 
-/* ----------------------- 删除技能 -------------------------------------- */
+/* ----------------------- 删除技能（仅用户可操作） ----------------------- */
 
 function openDeleteSkillModal(skillName) {
   const skill = state.catalog.skills[skillName];
@@ -1722,11 +2480,11 @@ function openDeleteSkillModal(skillName) {
   openModal('delete-skill', { skillName }, modalShell(
     '删除技能',
     `<form data-form="delete-skill">
-       <div class="notice danger">${icon('error')}删除后将永久移除技能文件夹「${esc(skillName)}」及其资源文件。</div>
+       <div class="notice danger">${icon('error')}删除后将永久移除技能文件夹「${esc(skillName)}」及其资源文件。此操作仅用户可执行，整理会话中的 Agent 无此权限。</div>
        <div class="notice success" style="margin-top:8px">${icon('check')}历史使用统计会保留，来源与场景路径仍然可见。</div>
        <div class="field" style="margin:16px 0 0">
          <span class="field-label">将从以下场景解链（${paths.length}）</span>
-         ${paths.length ? `<div class="skill-scenes">${paths.map((path) => `<span class="path-chip">${esc(path)}</span>`).join('')}</div>` : '<div class="field-hint">该技能当前未挂载到任何场景。</div>'}
+         ${paths.length ? `<div class="skill-scenes">${paths.map((path) => `<span class="path-chip">${esc(path)}</span>`).join('')}</div>` : '<div class="field-hint">该技能当前未分类，未挂载到任何场景。</div>'}
        </div>
      </form>`,
     `<button class="btn btn-ghost" type="button" data-close-modal>取消</button>
@@ -1749,33 +2507,43 @@ function handleDeleteSkillSubmit() {
   renderAll();
 }
 
-/* ----------------------- 上传场景树 ------------------------------------- */
-
-let pendingUpload = null;
+/* ----------------------- 上传技能（仅收集技能） -------------------------- */
 
 function sampleSuccessUploadItem() {
   return {
-    name: 'scene-tree-ops-sample',
+    name: 'skills-bundle-20250816',
     files: [
       {
-        path: '运维与可靠性/incident-review/SKILL.md',
+        path: 'incident-review/SKILL.md',
         content: skillMd('incident-review', '线上事故复盘流程：时间线还原、根因分析与行动项跟踪。', '# Incident Review\n\n1. 还原时间线。\n2. 定位根因。\n3. 输出行动项并跟踪。'),
       },
       {
-        path: '运维与可靠性/incident-review/runbook.md',
+        path: 'incident-review/runbook.md',
         content: '# Runbook\n\n- 先止损，再定位。\n- 恢复后保留现场。\n- 复盘行动项必须可验证。',
       },
       {
-        path: '运维与可靠性/可观测性/slo-checklist/SKILL.md',
+        path: 'archives/observability/slo-checklist/SKILL.md',
         content: skillMd('slo-checklist', 'SLO 与监控告警清单：指标口径、告警分级与排班响应。', '# SLO Checklist\n\n1. 明确指标口径。\n2. 告警分级。\n3. 空页与排班确认。'),
       },
       {
-        path: '后端开发/sql-review/SKILL.md',
+        path: 'archives/observability/slo-checklist/alert-rules.md',
+        content: '# Alert Rules\n\n- 错误预算消耗 > 30% 触发 P1。\n- 每季度复核一次指标口径。',
+      },
+      {
+        path: 'sql-pack/sql-review/SKILL.md',
         content: skillMd('sql-review', 'SQL 与索引评审（示例更新版），新增深分页游标检查。', '# SQL Review\n\n更新：深分页优先使用游标，并对 OFFSET 超阈值告警。'),
       },
       {
-        path: '后端开发/sql-review/checklist.sql',
+        path: 'sql-pack/sql-review/checks.sql',
         content: '-- 检查：过滤条件、JOIN、排序、分页\nSELECT 1;\n',
+      },
+      {
+        path: 'notes/README.txt',
+        content: '本文件不在任何技能文件夹内，将被忽略。',
+      },
+      {
+        path: 'notes/scan-results.csv',
+        content: 'a,b,c\n1,2,3\n',
       },
     ],
   };
@@ -1783,7 +2551,7 @@ function sampleSuccessUploadItem() {
 
 function sampleFailureUploadItem() {
   return {
-    name: 'scene-tree-invalid-sample',
+    name: 'skills-invalid-sample',
     files: [
       {
         path: 'frontend-api/SKILL.md',
@@ -1804,13 +2572,13 @@ function sampleFailureUploadItem() {
 function openUploadModal() {
   pendingUpload = null;
   openModal('upload', null, modalShell(
-    '上传场景树',
+    '上传技能',
     `<form data-form="upload">
        <input type="file" id="upload-input" webkitdirectory multiple hidden>
        <div class="dropzone">
          <span class="dropzone-icon">${icon('upload')}</span>
-         <div class="dropzone-title">选择一个场景树文件夹</div>
-         <p class="dropzone-desc">所选文件夹作为场景树根目录与现有根场景合并。不含 SKILL.md 的文件夹识别为场景；含直接 SKILL.md 的文件夹整体识别为技能。ZIP 上传已移除。</p>
+         <div class="dropzone-title">选择一个技能文件夹</div>
+         <p class="dropzone-desc">递归扫描文件夹下的所有技能：含直接 SKILL.md 的文件夹整体识别为一个技能（整棵子树的资源全部保留）。文件夹层级不会创建任何场景；技能文件夹之外的散文件会被忽略并列入清单。ZIP 上传已移除。</p>
          <div class="dropzone-actions">
            <button class="btn btn-secondary" type="button" data-action="choose-folder">${icon('upload')}选择文件夹</button>
            <button class="btn btn-ghost" type="button" data-action="sample-upload-ok">${icon('check')}载入成功示例</button>
@@ -1820,7 +2588,7 @@ function openUploadModal() {
        <div id="upload-preview" class="upload-preview"></div>
      </form>`,
     `<button class="btn btn-ghost" type="button" data-close-modal>取消</button>
-     <button class="btn btn-primary" type="submit" form="upload" id="upload-submit" disabled>导入场景树</button>`,
+     <button class="btn btn-primary" type="submit" form="upload" id="upload-submit" disabled>上传并开始整理</button>`,
     'large',
   ));
 }
@@ -1848,7 +2616,7 @@ async function filesToUploadItem(fileList) {
 }
 
 function setPendingUpload(item) {
-  const analyzed = analyzeSceneTree(item);
+  const analyzed = analyzeUpload(item);
   pendingUpload = { item, analyzed };
   renderUploadPreview();
 }
@@ -1867,27 +2635,19 @@ function renderUploadPreview() {
   const { item, analyzed } = pendingUpload;
   if (!analyzed.ok) {
     preview.innerHTML = `
-      <div class="notice danger">${icon('error')}<div><b>校验失败，本次上传不会导入任何内容。</b><ul class="reason-list" style="margin:8px 0 0">${analyzed.reasons.map((reason) => `<li>${esc(reason)}</li>`).join('')}</ul></div></div>`;
+      <div class="notice danger">${icon('error')}<div><b>校验失败，本次上传整体拒绝，不会落盘任何内容。</b><ul class="reason-list" style="margin:8px 0 0">${analyzed.reasons.map((reason) => `<li>${esc(reason)}</li>`).join('')}</ul></div></div>`;
     if (submit) submit.disabled = true;
     return;
   }
 
-  const newScenes = analyzed.nonRootScenes.filter((path) => {
-    let parent = state.catalog.scenes[state.catalog.rootSceneId];
-    const segments = path.split('/').filter(Boolean);
-    for (const segment of segments) {
-      const child = (parent.children || []).find((id) => state.catalog.scenes[id] && state.catalog.scenes[id].name === segment);
-      if (!child) return true;
-      parent = state.catalog.scenes[child];
-    }
-    return false;
-  }).length;
+  const overwrittenNames = analyzed.skills.filter((skill) => state.catalog.skills[skill.name]).map((skill) => skill.name);
 
   preview.innerHTML = `
-    <div class="notice success">${icon('check')}已解析文件夹「${esc(item.name || 'selected-folder')}」，校验通过。</div>
+    <div class="notice success">${icon('check')}已收集 ${analyzed.skills.length} 个技能（共 ${analyzed.fileCount} 个文件），校验通过。上传后技能处于未分类状态，不会创建或复用任何场景。</div>
     <div class="upload-summary" style="margin-top:12px">
-      <div class="upload-summary-item"><div class="upload-summary-label">新建场景</div><div class="upload-summary-value">${newScenes}</div></div>
       <div class="upload-summary-item"><div class="upload-summary-label">技能</div><div class="upload-summary-value">${analyzed.skills.length}</div></div>
+      <div class="upload-summary-item"><div class="upload-summary-label">覆盖</div><div class="upload-summary-value">${overwrittenNames.length}</div></div>
+      <div class="upload-summary-item"><div class="upload-summary-label">忽略文件</div><div class="upload-summary-value">${analyzed.ignoredFiles.length}</div></div>
       <div class="upload-summary-item"><div class="upload-summary-label">文件</div><div class="upload-summary-value">${analyzed.fileCount}</div></div>
     </div>
     <div class="upload-list">
@@ -1896,21 +2656,27 @@ function renderUploadPreview() {
           <div class="upload-skill-head">
             <span class="tree-icon">${icon('skill')}</span>
             <span class="upload-skill-name mono">${esc(skill.name)}</span>
-            ${state.catalog.skills[skill.name] ? badge('同名更新', 'warning') : badge('新技能', 'success')}
+            ${state.catalog.skills[skill.name] ? badge('同名覆盖 · 保留历史', 'warning') : badge('新技能 · 未分类', 'success')}
             <span style="margin-left:auto;font-size:12px;color:var(--ink-3)">${Object.keys(skill.files).length} 文件</span>
           </div>
           <div class="upload-skill-desc">${esc(skill.folder || '根目录')} · ${esc(skill.description)}</div>
         </div>`).join('')}
     </div>
-    ${analyzed.ignoredFiles.length ? `<div class="field-hint" style="margin-top:8px">场景目录中的普通文件不会作为技能资源导入：${esc(analyzed.ignoredFiles.slice(0, 4).join('、'))}${analyzed.ignoredFiles.length > 4 ? ' 等' : ''}</div>` : ''}`;
+    ${analyzed.ignoredFiles.length
+      ? `<div class="notice info" style="margin-top:8px">${icon('info')}<div>技能文件夹之外的散文件已忽略（${analyzed.ignoredFiles.length} 个）：${esc(analyzed.ignoredFiles.slice(0, 4).join('、'))}${analyzed.ignoredFiles.length > 4 ? ` 等 ${analyzed.ignoredFiles.length} 个` : ''}</div></div>`
+      : ''}
+    <div class="field-hint" style="margin-top:8px">任一技能校验失败时整体拒绝；同名技能原地覆盖并保留 createdAt 与使用历史。上传成功后自动开启整理会话，把本批技能归入合适场景。</div>`;
   if (submit) submit.disabled = false;
 }
 
 function handleUploadSubmit() {
   if (!pendingUpload || !pendingUpload.analyzed.ok) return;
-  const result = importSceneTree(state.catalog, pendingUpload.item);
+
+  const preCatalog = state.catalog;
+  const preFiles = clone(state.skillFiles);
+  const result = mergeUpload(preCatalog, pendingUpload.item);
   if (!result.ok) {
-    toast(result.reasons ? result.reasons[0] : '导入失败。', 'danger');
+    toast(result.reasons ? result.reasons[0] : '上传失败。', 'danger');
     return;
   }
 
@@ -1918,10 +2684,41 @@ function handleUploadSubmit() {
   for (const skill of result.skills) {
     state.skillFiles[skill.name] = clone(skill.files);
   }
-  const message = `导入完成：新建场景 ${result.sceneCounts.created} 个，复用 ${result.sceneCounts.reused} 个；技能新建 ${result.skillsCreated} 个，更新 ${result.skillsUpdated} 个。`;
+
+  // 上传槽位快照：整树 + 本批新增技能名 + 被覆盖技能的原文件备份
+  const overwrittenBackup = {};
+  for (const name of result.overwritten) overwrittenBackup[name] = clone(preFiles[name]);
+  state.snapshots.upload = {
+    at: Date.now(),
+    catalog: clone(preCatalog),
+    batch: { added: result.added, overwritten: overwrittenBackup },
+  };
+
   closeModal();
-  toast(message, 'success', 5000);
+
+  if (state.organizeRunning) {
+    toast(`上传完成：新建 ${result.added.length} 个、覆盖 ${result.overwritten.length} 个。整理会话正在运行，本次不自动开启整理。`, 'warning', 5000);
+    renderAll();
+    return;
+  }
+
+  const started = startOrganizeSession('classify', { uploaded: result.added, overwritten: result.overwritten });
   renderAll();
+  toast(
+    `上传完成：新建 ${result.added.length} 个、覆盖 ${result.overwritten.length} 个，整理会话已自动开启。`,
+    'success',
+    {
+      duration: 5000,
+      actionLabel: '查看会话',
+      onAction: () => {
+        if (started.ok) {
+          state.activeSessionId = started.session.id;
+          renderAll();
+          toast('已切换到整理会话，可在会话画布中观察或打断。', 'info');
+        }
+      },
+    },
+  );
 }
 
 /* ----------------------- 数据迁移 -------------------------------------- */
@@ -1930,7 +2727,7 @@ function openRelocateModal() {
   openModal('relocate', null, modalShell(
     '迁移数据落点',
     `<form data-form="relocate">
-       <div class="notice info" style="margin-bottom:16px">${icon('info')}数据默认落在工作目录根 <span class="mono">.skillgate/</span>，也可由 <span class="mono">.skillgate-anchor</span> 指向自定义位置。</div>
+       <div class="notice info" style="margin-bottom:16px">${icon('info')}数据默认落在工作目录根 <span class="mono">.skillgate/</span>，也可由 <span class="mono">.skillgate-anchor</span> 指向自定义位置。快照与备份位于 <span class="mono">snapshots/</span>。</div>
        <div class="field">
          <label class="field-label" for="relocate-path">数据目录</label>
          <input id="relocate-path" name="dataDir" type="text" value="${esc(state.dataDir)}" placeholder="如 .skillgate/ 或 .config/skillgate/">
@@ -1970,8 +2767,36 @@ function handleCatalogAction(action, target) {
 
   if (action === 'new-scene') {
     openSceneModal('create', { parentId: state.selectedSceneId });
-  } else if (action === 'upload-tree') {
+  } else if (action === 'upload') {
     openUploadModal();
+  } else if (action === 'organize-tidy') {
+    if (state.organizeRunning) {
+      toast('整理会话进行中：同一时间只允许一个整理会话。', 'warning');
+      return;
+    }
+    const started = startOrganizeSession('tidy');
+    if (!started.ok) {
+      toast(started.error, 'warning');
+      return;
+    }
+    renderAll();
+    toast('已开启一键整理：整理槽位快照已就绪，完成后可一键回滚。', 'info', 4000);
+  } else if (action === 'organize-detect') {
+    if (state.organizeRunning) {
+      toast('整理会话进行中：同一时间只允许一个整理会话。', 'warning');
+      return;
+    }
+    const started = startOrganizeSession('detect');
+    if (!started.ok) {
+      toast(started.error, 'warning');
+      return;
+    }
+    renderAll();
+    toast('已开启冲突检测：只读会话，不打快照、不改动场景树。', 'info', 4000);
+  } else if (action === 'rollback-upload') {
+    openRollbackModal('upload');
+  } else if (action === 'rollback-organize') {
+    openRollbackModal('organize');
   } else if (action === 'relocate') {
     openRelocateModal();
   } else if (action === 'clear-search') {
@@ -2003,7 +2828,7 @@ function handleCatalogAction(action, target) {
       return;
     }
     state.catalog = result.catalog;
-    toast(`已从当前场景解除挂载「${target.dataset.skill}」。`, 'success');
+    toast(`已从当前场景解除挂载「${target.dataset.skill}」，技能回到未分类。`, 'success');
     renderAll();
   } else if (action === 'attach-skill') {
     openAttachSkillModal(id);
@@ -2099,6 +2924,23 @@ function bindEvents() {
     if (!button) return;
     state.tab = button.dataset.tab;
     renderAll();
+  });
+
+  $('#rail-sessions').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-session]');
+    if (!button) return;
+    state.activeSessionId = button.dataset.session;
+    renderAll();
+  });
+
+  $('#new-chat-btn').addEventListener('click', () => {
+    toast('原型演示：新建对话由真实 DSH 宿主管理，此处不展开。', 'info');
+  });
+
+  $('#chat-header-actions').addEventListener('click', (event) => {
+    if (event.target.closest('#interrupt-organize')) {
+      interruptOrganize();
+    }
   });
 
   $('#panel-body').addEventListener('click', (event) => {
@@ -2206,6 +3048,7 @@ function bindEvents() {
     if (form.dataset.form === 'delete-skill') handleDeleteSkillSubmit();
     if (form.dataset.form === 'upload') handleUploadSubmit();
     if (form.dataset.form === 'relocate') handleRelocateSubmit(form);
+    if (form.dataset.form === 'rollback') handleRollbackSubmit();
   });
 
   $('#reset-demo').addEventListener('click', resetState);

@@ -281,9 +281,27 @@ svg.icon {
 }
 
 .rail-item-text {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.rail-item .badge {
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.rail-status {
+  margin-left: auto;
+}
+
+.rail-status .dot {
+  width: 6px;
+  height: 6px;
 }
 
 .rail-account {
@@ -342,6 +360,17 @@ svg.icon {
 .chat-header-sub {
   font-size: 12px;
   color: var(--ink-3);
+}
+
+.chat-header-sub .badge {
+  margin-left: 6px;
+}
+
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
 .chat-feed {
@@ -2090,4 +2119,192 @@ body.panel-closed .panel {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ------------------------------------------------------------------------ */
+/* 整理流程：一键整理 / 冲突检测 / 未分类分组 / 整理报告 / 快照回滚           */
+/* ------------------------------------------------------------------------ */
+
+/* 页面头部组织工具栏 */
+.organize-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.organize-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--warning);
+  min-width: 0;
+}
+
+.organize-status svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  animation: status-pulse 1.6s ease infinite;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* 会话画布：整理会话工具卡片变体 */
+.tool-card.system-card {
+  border-color: var(--line);
+  background: var(--primary-soft);
+}
+
+.tool-card.system-card .tool-card-head {
+  color: var(--primary);
+}
+
+.tool-card.reject-card {
+  border-color: var(--line);
+  background: var(--danger-soft);
+}
+
+.tool-card.reject-card .tool-card-head {
+  color: var(--danger);
+}
+
+/* 整理报告卡片 */
+.report-card .table-head {
+  padding-bottom: 8px;
+}
+
+.report-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 0 8px;
+}
+
+.report-title {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-3);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-block {
+  border-top: 1px solid var(--line-soft);
+  padding: 10px 0 2px;
+}
+
+.report-block-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  margin-bottom: 4px;
+}
+
+.report-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+
+.report-list li {
+  margin-bottom: 2px;
+}
+
+.report-list .badge {
+  margin-right: 6px;
+  height: 18px;
+  font-size: 11px;
+}
+
+.report-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.report-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 12px;
+  margin-top: 4px;
+}
+
+/* 快照与回滚槽位 */
+.slot-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+}
+
+.slot-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--primary-soft);
+  color: var(--primary);
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.slot-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.slot-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.slot-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-1);
+  flex-wrap: wrap;
+}
+
+.slot-desc {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+/* Toast 带操作按钮（如「查看会话」） */
+.toast {
+  pointer-events: auto;
+}
+
+.toast-action {
+  margin-left: 8px;
+  border: 0;
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.toast-action:hover {
+  background: var(--primary-soft-hover);
 }
